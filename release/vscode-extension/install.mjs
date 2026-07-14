@@ -63,6 +63,9 @@ if (!cli) {
 }
 
 console.log(`\n▸ Installing into ${cli}...`);
+console.warn(
+  `\nNOTE: If the below fails because "Unable to connect to VS Code server", try running in a fresh terminal.\n`,
+);
 run(cli, ["--install-extension", path.join(root, VSIX), "--force"]);
 
 console.log(

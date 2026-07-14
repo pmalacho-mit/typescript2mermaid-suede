@@ -12,7 +12,8 @@
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
-      { "command": "tsMermaid.preview", "title": "typescript2mermaid: Preview Diagram" }
+      { "command": "tsMermaid.preview", "title": "typescript2mermaid: Preview Diagram" },
+      { "command": "tsMermaid.showLog", "title": "typescript2mermaid: Show Log" }
     ]
   },
   "scripts": {

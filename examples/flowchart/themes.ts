@@ -4,12 +4,17 @@ type A = {};
 type B = {};
 type C = {};
 
-type Flow = Flowchart.Diagram<"topdown", [
-  Flowchart.Connect<A, B>,
-  Flowchart.Connect<B, C>,
-]>;
+type Flow = Flowchart.Diagram<
+  "topdown",
+  [Flowchart.Connect<A, B>, Flowchart.Connect<B, C>]
+>;
 
-export type Default = Render<Flow>;
+export type Default = Render<
+  Flowchart.Diagram<
+    "topdown",
+    [Flowchart.Connect<A, B>, Flowchart.Connect<B, C>]
+  >
+>;
 
 export type DefaultExplicit = Render<Flow, [Theme<"default">]>;
 
