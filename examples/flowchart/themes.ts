@@ -9,12 +9,7 @@ type Flow = Flowchart.Diagram<
   [Flowchart.Connect<A, B>, Flowchart.Connect<B, C>]
 >;
 
-export type Default = Render<
-  Flowchart.Diagram<
-    "topdown",
-    [Flowchart.Connect<A, B>, Flowchart.Connect<B, C>]
-  >
->;
+export type Default = Render<Flow>;
 
 export type DefaultExplicit = Render<Flow, [Theme<"default">]>;
 
