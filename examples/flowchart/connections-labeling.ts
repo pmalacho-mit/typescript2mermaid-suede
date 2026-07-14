@@ -1,0 +1,16 @@
+import type { Render, Flowchart } from "../../release/dsl.js";
+
+type A = {};
+type B = {};
+type C = {};
+type D = {};
+type E = {};
+type F = {};
+type G = {};
+
+export type LabeledEdges = Render<Flowchart.Diagram<"topdown", [
+  Flowchart.Connect<A, B, "Yes">,
+  Flowchart.Connect<A, C, "No">,
+  Flowchart.Connect<D, E, "maybe", "dotted">,
+  Flowchart.Connect<F, G, "always", "thick">,
+]>>;
