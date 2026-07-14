@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/pmalacho-mit/typescript2mermaid-suede
+	branch = release
+	commit = 598f61e91cb5964f7ec03d606b1fa2da70b96d3d
+	parent = f8d491d6923d577dc2ee48d8dbf9c21d42ada4fd
+	method = merge
+	cmdver = 0.4.9
