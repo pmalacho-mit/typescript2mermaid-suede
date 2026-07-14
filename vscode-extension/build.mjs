@@ -7,7 +7,7 @@
  * Only the `vscode` module stays external (provided by the editor at runtime).
  */
 import { build } from "esbuild";
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { accessSync, chmodSync, constants, cpSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -45,8 +45,19 @@ await build({
 // The preview webview loads Mermaid from a local asset (no network, and the
 // packaged .vsix contains no node_modules).
 mkdirSync(path.join(root, "media"), { recursive: true });
+const mermaidAsset = path.join(root, "media", "mermaid.min.js");
 cpSync(
   path.join(root, "node_modules", "mermaid", "dist", "mermaid.min.js"),
-  path.join(root, "media", "mermaid.min.js"),
+  mermaidAsset,
 );
+// cpSync carries the source mode across, and some mounts (e.g. the Docker
+// Desktop `fakeowner` bind used by the devcontainer) hand back a mode with no
+// read bit. vsce stores whatever mode it finds directly in the .vsix, so an
+// unreadable asset here becomes an unreadable asset on every consumer machine
+// whose filesystem actually enforces permissions — the webview's <script> then
+// 404s and the preview silently degrades to raw text. Pin the mode, then prove
+// the file is readable before we let the build pass.
+chmodSync(mermaidAsset, 0o644);
+accessSync(mermaidAsset, constants.R_OK);
+
 console.log("bundled dist/extension.js and copied media/mermaid.min.js");

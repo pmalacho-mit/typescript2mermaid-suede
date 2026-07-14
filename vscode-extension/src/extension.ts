@@ -6,6 +6,22 @@ import * as fs from "node:fs";
 // library source next to this folder — compiled straight into the bundle.
 import { GeneratorSession, type EmittedDiagram } from "typescript2mermaid-lib";
 
+/* ------------------------------ logging ------------------------------ */
+
+/**
+ * "typescript2mermaid" in the Output panel.
+ *
+ * The webview is a separate context whose console is only reachable through the
+ * webview developer tools, so failures in there are invisible from the editor.
+ * Everything it does is mirrored here instead.
+ */
+const out = vscode.window.createOutputChannel("typescript2mermaid");
+
+function log(message: string): void {
+  const time = new Date().toISOString().slice(11, 23);
+  out.appendLine(`[${time}] ${message}`);
+}
+
 /* ------------------------- session + caching ------------------------- */
 
 const sessions = new Map<string, GeneratorSession>();
@@ -91,7 +107,7 @@ class RenderHoverProvider implements vscode.HoverProvider {
     md.appendMarkdown(
       `\n[Preview rendered diagram](command:tsMermaid.preview?${args})`,
     );
-    md.isTrusted = true;
+    md.isTrusted = { enabledCommands: ["tsMermaid.preview"] };
     return new vscode.Hover(md, range);
   }
 }
@@ -129,23 +145,20 @@ class RenderCodeLensProvider implements vscode.CodeLensProvider {
 
 /* ----------------------------- preview ------------------------------- */
 
-async function openPreview(
-  ctx: vscode.ExtensionContext,
-  uriString: string,
-  name: string,
-): Promise<void> {
-  const doc = await vscode.workspace.openTextDocument(
-    vscode.Uri.parse(uriString),
-  );
-  const diagram = (await diagramsFor(doc)).find((d) => d.name === name);
-  if (!diagram) {
-    void vscode.window.showWarningMessage(
-      `typescript2mermaid: diagram "${name}" not found.`,
-    );
-    return;
-  }
+/**
+ * Open panels, keyed by document + diagram name.
+ *
+ * Every entry owns a webview running its own ~3.5MB Mermaid bundle, so a panel
+ * is a genuinely expensive object: we reuse one whenever the same diagram is
+ * previewed again rather than stacking duplicates.
+ */
+const previews = new Map<string, vscode.WebviewPanel>();
 
-  const mermaidCandidates = [
+const previewKey = (uriString: string, name: string) => `${uriString}::${name}`;
+
+/** Locate the bundled Mermaid asset, requiring it to be *readable* — not merely present. */
+function mermaidAssetPath(ctx: vscode.ExtensionContext): string | undefined {
+  const candidates = [
     path.join(ctx.extensionPath, "media", "mermaid.min.js"),
     path.join(
       ctx.extensionPath,
@@ -155,48 +168,375 @@ async function openPreview(
       "mermaid.min.js",
     ),
   ];
-  const mermaidPath = mermaidCandidates.find((p) => fs.existsSync(p));
-  if (!mermaidPath) {
+  for (const p of candidates) {
+    try {
+      const stat = fs.statSync(p);
+      const mode = (stat.mode & 0o777).toString(8);
+      // existsSync() is true for a file we cannot open; that distinction is the
+      // whole bug this logging exists to expose.
+      fs.accessSync(p, fs.constants.R_OK);
+      log(`  asset OK: ${p} (${stat.size} bytes, mode ${mode})`);
+      return p;
+    } catch (e) {
+      const exists = fs.existsSync(p);
+      log(
+        `  asset unusable: ${p} — ${exists ? "exists but unreadable" : "not found"} (${(e as Error).message})`,
+      );
+    }
+  }
+  return undefined;
+}
+
+async function openPreview(
+  ctx: vscode.ExtensionContext,
+  uriString: string,
+  name: string,
+): Promise<void> {
+  log(`preview requested: ${name} in ${uriString}`);
+  const doc = await vscode.workspace.openTextDocument(
+    vscode.Uri.parse(uriString),
+  );
+
+  let diagram: EmittedDiagram | undefined;
+  try {
+    const diagrams = await diagramsFor(doc);
+    log(`  generated ${diagrams.length} diagram(s): ${diagrams.map((d) => d.name).join(", ") || "<none>"}`);
+    diagram = diagrams.find((d) => d.name === name);
+  } catch (e) {
+    log(`  GENERATION FAILED: ${(e as Error).message}`);
     void vscode.window.showErrorMessage(
-      "typescript2mermaid: mermaid.min.js asset missing — run the build (node build.mjs).",
+      `typescript2mermaid: could not generate "${name}" — see the typescript2mermaid Output channel.`,
     );
     return;
   }
-  const mermaidJs = vscode.Uri.file(mermaidPath);
-  const panel = vscode.window.createWebviewPanel(
-    "tsMermaidPreview",
-    `Diagram: ${name}`,
-    vscode.ViewColumn.Beside,
-    {
-      enableScripts: true,
-      localResourceRoots: [vscode.Uri.file(path.dirname(mermaidJs.fsPath))],
-    },
-  );
-  const scriptUri = panel.webview.asWebviewUri(mermaidJs);
-  panel.webview.html = previewHtml(scriptUri.toString(), diagram.code);
+  if (!diagram) {
+    log(`  diagram "${name}" not found`);
+    void vscode.window.showWarningMessage(
+      `typescript2mermaid: diagram "${name}" not found.`,
+    );
+    return;
+  }
+  log(`  mermaid source (${diagram.code.length} chars):\n${diagram.code}`);
+
+  log(`  extensionPath: ${ctx.extensionPath}`);
+  const mermaidPath = mermaidAssetPath(ctx);
+  if (!mermaidPath) {
+    log("  ABORT: no readable mermaid.min.js");
+    void vscode.window.showErrorMessage(
+      "typescript2mermaid: mermaid.min.js asset is missing or unreadable — re-run the build (node build.mjs). See the typescript2mermaid Output channel.",
+    );
+    return;
+  }
+
+  const key = previewKey(uriString, name);
+  let panel = previews.get(key);
+  if (panel) {
+    log("  reusing existing panel");
+    panel.reveal(panel.viewColumn ?? vscode.ViewColumn.Beside, true);
+  } else {
+    log("  creating new panel");
+    panel = vscode.window.createWebviewPanel(
+      "tsMermaidPreview",
+      `Diagram: ${name}`,
+      vscode.ViewColumn.Beside,
+      {
+        enableScripts: true,
+        localResourceRoots: [vscode.Uri.file(path.dirname(mermaidPath))],
+      },
+    );
+    previews.set(key, panel);
+    panel.onDidDispose(() => {
+      log(`preview closed: ${name}`);
+      previews.delete(key);
+    });
+    // The webview reports its own progress and failures back over this channel.
+    panel.webview.onDidReceiveMessage((m) => {
+      if (m?.type === "log") log(`  [webview] ${m.message}`);
+    });
+  }
+
+  log(`  localResourceRoots: ${path.dirname(mermaidPath)}`);
+  const scriptUri = panel.webview.asWebviewUri(vscode.Uri.file(mermaidPath));
+  log(`  script URI: ${scriptUri.toString()}`);
+
+  // Assigning html reloads the webview, so a reused panel picks up edits made
+  // since it was opened.
+  const html = previewHtml(panel.webview, scriptUri.toString(), diagram.code);
+  log(`  cspSource: ${panel.webview.cspSource}`);
+  log(`  html assigned (${html.length} chars); waiting on webview...`);
+  panel.webview.html = html;
 }
 
-function previewHtml(mermaidScriptUri: string, code: string): string {
-  const escaped = code
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+function nonce(): string {
+  let text = "";
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  for (let i = 0; i < 32; i++)
+    text += chars.charAt(Math.floor(Math.random() * chars.length));
+  return text;
+}
+
+/** Exported so the render can be exercised headlessly; not part of the extension API. */
+export function previewHtml(
+  webview: Pick<vscode.Webview, "cspSource">,
+  mermaidScriptUri: string,
+  code: string,
+): string {
+  const n = nonce();
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${n}';">
   <style>
-    body { display: flex; justify-content: center; padding: 2rem; }
-    .mermaid { max-width: 100%; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      flex-direction: column;
+      color: var(--vscode-editor-foreground);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+    }
+    #toolbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+    }
+    #toolbar button {
+      background: var(--vscode-button-secondaryBackground, transparent);
+      color: var(--vscode-button-secondaryForeground, inherit);
+      border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+      border-radius: 4px;
+      padding: 0.15rem 0.5rem;
+      min-width: 1.9rem;
+      cursor: pointer;
+      font: inherit;
+      line-height: 1.4;
+    }
+    #toolbar button:hover {
+      background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
+    }
+    #zoom-level {
+      min-width: 3.4rem;
+      text-align: center;
+      opacity: 0.85;
+      font-variant-numeric: tabular-nums;
+    }
+    #hint { margin-left: auto; opacity: 0.6; font-size: 0.85em; }
+    /* The viewport clips; #canvas is what actually moves and scales. */
+    #viewport { flex: 1 1 auto; position: relative; overflow: hidden; cursor: grab; }
+    #viewport.panning { cursor: grabbing; }
+    #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+    #error {
+      margin: 1rem;
+      white-space: pre-wrap;
+      font-family: var(--vscode-editor-font-family, monospace);
+      color: var(--vscode-errorForeground);
+      border: 1px solid var(--vscode-errorForeground);
+      border-radius: 4px;
+      padding: 1rem;
+    }
+    [hidden] { display: none !important; }
   </style>
 </head>
 <body>
-  <pre class="mermaid">${escaped}</pre>
-  <script src="${mermaidScriptUri}"></script>
-  <script>
-    const dark = document.body.classList.contains("vscode-dark")
-      || document.body.classList.contains("vscode-high-contrast");
-    mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "default" });
+  <div id="toolbar" hidden>
+    <button id="zoom-out" title="Zoom out">&#8722;</button>
+    <span id="zoom-level">100%</span>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="fit" title="Fit diagram to window">Fit</button>
+    <button id="reset" title="Actual size">1:1</button>
+    <span id="hint">drag to pan &middot; scroll to move &middot; ctrl/&#8984; + scroll to zoom</span>
+  </div>
+  <div id="viewport" hidden><div id="canvas"></div></div>
+  <div id="error" hidden></div>
+  <script nonce="${n}" src="${mermaidScriptUri}" onerror="window.__tsmScriptFailed = true"></script>
+  <script nonce="${n}">
+    (function () {
+      // Mirror progress to the extension's Output channel; the webview console is
+      // otherwise only reachable through the webview developer tools.
+      let post = function () {};
+      try {
+        const api = acquireVsCodeApi();
+        post = (message) => api.postMessage({ type: "log", message });
+      } catch (e) { /* no webview host (headless harness) */ }
+
+      window.addEventListener("error", (e) =>
+        post("window.onerror: " + e.message + " @ " + (e.filename || "?") + ":" + e.lineno));
+      window.addEventListener("securitypolicyviolation", (e) =>
+        post("CSP VIOLATION: blocked=" + e.blockedURI + " directive=" + e.violatedDirective));
+
+      const errorEl = document.getElementById("error");
+      const toolbar = document.getElementById("toolbar");
+      const viewport = document.getElementById("viewport");
+      const canvas = document.getElementById("canvas");
+      const zoomLevel = document.getElementById("zoom-level");
+
+      function fail(message) {
+        post("FAILED: " + message);
+        errorEl.hidden = false;
+        errorEl.textContent = message;
+      }
+
+      post("webview script running; typeof mermaid=" + typeof mermaid +
+           "; scriptLoadFailed=" + !!window.__tsmScriptFailed);
+
+      // Previously a missing bundle left the raw Mermaid source on screen, which
+      // looks like a rendering bug rather than an asset that never loaded.
+      if (typeof mermaid === "undefined") {
+        fail("Failed to load mermaid.min.js.\\nThe webview could not fetch the extension asset — re-run the build and reinstall.");
+        return;
+      }
+
+      /* ------------------------- pan / zoom ------------------------- */
+
+      const MIN_SCALE = 0.1, MAX_SCALE = 8;
+      let scale = 1, tx = 0, ty = 0;
+      let natW = 0, natH = 0;
+      // Once the view is deliberately positioned, a resize must not yank it back.
+      let userAdjusted = false;
+
+      const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+      function apply() {
+        canvas.style.transform =
+          "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+        zoomLevel.textContent = Math.round(scale * 100) + "%";
+      }
+
+      // Keep the point under the cursor fixed while the scale changes.
+      function zoomAt(cx, cy, factor) {
+        const next = clamp(scale * factor, MIN_SCALE, MAX_SCALE);
+        if (next === scale) return;
+        tx = cx - (cx - tx) * (next / scale);
+        ty = cy - (cy - ty) * (next / scale);
+        scale = next;
+        userAdjusted = true;
+        apply();
+      }
+
+      function centerAt(s) {
+        const r = viewport.getBoundingClientRect();
+        scale = clamp(s, MIN_SCALE, MAX_SCALE);
+        tx = (r.width - natW * scale) / 2;
+        ty = (r.height - natH * scale) / 2;
+        apply();
+      }
+
+      function fit() {
+        const r = viewport.getBoundingClientRect();
+        const pad = 24;
+        // Never scale a small diagram up past 1:1 just to fill the panel.
+        const s = Math.min((r.width - pad * 2) / natW, (r.height - pad * 2) / natH, 1);
+        centerAt(s);
+        userAdjusted = false;
+      }
+
+      function mount(svgText) {
+        canvas.innerHTML = svgText;
+        const svg = canvas.querySelector("svg");
+        if (!svg) { fail("mermaid returned no <svg>"); return; }
+        // Mermaid emits width=100% + an inline max-width, which fights a scale
+        // transform. Pin the SVG to its intrinsic viewBox size instead.
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        natW = (vb && vb.width) || svg.getBoundingClientRect().width || 800;
+        natH = (vb && vb.height) || svg.getBoundingClientRect().height || 600;
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+        svg.style.maxWidth = "none";
+        svg.style.width = natW + "px";
+        svg.style.height = natH + "px";
+        svg.style.display = "block";
+        toolbar.hidden = false;
+        viewport.hidden = false;
+        fit();
+      }
+
+      document.getElementById("zoom-in").addEventListener("click", () => {
+        const r = viewport.getBoundingClientRect();
+        zoomAt(r.width / 2, r.height / 2, 1.25);
+      });
+      document.getElementById("zoom-out").addEventListener("click", () => {
+        const r = viewport.getBoundingClientRect();
+        zoomAt(r.width / 2, r.height / 2, 1 / 1.25);
+      });
+      document.getElementById("fit").addEventListener("click", fit);
+      document.getElementById("reset").addEventListener("click", () => {
+        centerAt(1);
+        userAdjusted = true;
+      });
+
+      viewport.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const r = viewport.getBoundingClientRect();
+        if (e.ctrlKey || e.metaKey) {
+          zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+        } else {
+          tx -= e.deltaX;
+          ty -= e.deltaY;
+          userAdjusted = true;
+          apply();
+        }
+      }, { passive: false });
+
+      let panning = false, startX = 0, startY = 0;
+      viewport.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        panning = true;
+        startX = e.clientX - tx;
+        startY = e.clientY - ty;
+        viewport.classList.add("panning");
+        try { viewport.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      viewport.addEventListener("pointermove", (e) => {
+        if (!panning) return;
+        tx = e.clientX - startX;
+        ty = e.clientY - startY;
+        userAdjusted = true;
+        apply();
+      });
+      function endPan(e) {
+        if (!panning) return;
+        panning = false;
+        viewport.classList.remove("panning");
+        try { viewport.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+      viewport.addEventListener("pointerup", endPan);
+      viewport.addEventListener("pointercancel", endPan);
+
+      window.addEventListener("resize", () => {
+        if (natW && !userAdjusted) fit();
+      });
+
+      /* --------------------------- render --------------------------- */
+
+      const dark =
+        document.body.classList.contains("vscode-dark") ||
+        document.body.classList.contains("vscode-high-contrast");
+
+      try {
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: "strict",
+          theme: dark ? "dark" : "default",
+        });
+        post("initialized (theme=" + (dark ? "dark" : "default") + "); rendering...");
+      } catch (e) {
+        fail("mermaid.initialize threw: " + ((e && e.message) || e));
+        return;
+      }
+
+      mermaid
+        .render("tsm-diagram", ${JSON.stringify(code)})
+        .then(({ svg }) => {
+          mount(svg);
+          post("render OK (" + svg.length + " chars of svg, " +
+               Math.round(natW) + "x" + Math.round(natH) + " natural)");
+        })
+        .catch((e) => fail("mermaid.render rejected: " + ((e && e.message) || e)));
+    })();
   </script>
 </body>
 </html>`;
@@ -205,7 +545,12 @@ function previewHtml(mermaidScriptUri: string, code: string): string {
 /* ----------------------------- activate ------------------------------ */
 
 export function activate(ctx: vscode.ExtensionContext): void {
+  log(`activated (extension ${ctx.extensionPath})`);
+  log(`VSCode ${vscode.version}`);
+
   ctx.subscriptions.push(
+    out,
+    vscode.commands.registerCommand("tsMermaid.showLog", () => out.show()),
     vscode.languages.registerHoverProvider(SELECTOR, new RenderHoverProvider()),
     vscode.languages.registerCodeLensProvider(
       SELECTOR,
@@ -215,10 +560,18 @@ export function activate(ctx: vscode.ExtensionContext): void {
       "tsMermaid.preview",
       (uriString: string, name: string) => openPreview(ctx, uriString, name),
     ),
+
+    // The diagram cache is keyed by path and would otherwise retain every file
+    // ever hovered for the lifetime of the window.
+    vscode.workspace.onDidCloseTextDocument((doc) =>
+      cache.delete(doc.uri.fsPath),
+    ),
   );
 }
 
 export function deactivate(): void {
+  for (const panel of previews.values()) panel.dispose();
+  previews.clear();
   sessions.clear();
   cache.clear();
 }
