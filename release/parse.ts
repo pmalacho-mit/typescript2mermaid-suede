@@ -42,6 +42,42 @@ export function argsOf(t: TypeNode | undefined): TypeNode[] {
   return t?.asKind(SyntaxKind.TypeReference)?.getTypeArguments() ?? [];
 }
 
+/**
+ * Follow a type reference through plain type aliases to the node it names, so
+ * `type Flow = Flowchart.Diagram<...>` can be used as `Render<Flow>`.
+ *
+ * Deliberately conservative — a reference is only followed when it takes no type
+ * arguments and names an alias that declares no type parameters. Generic aliases
+ * would need real type-argument substitution, which is the checker's job, not
+ * something worth reimplementing syntactically.
+ *
+ * Callers must only use this where a DSL construct is expected. Node identity in
+ * a flowchart comes from the *name* of the referenced type, so resolving `A` in
+ * `Connect<A, B>` down to its `{}` body would destroy the node's id.
+ */
+export function resolveAlias(t: TypeNode | undefined): TypeNode | undefined {
+  let current = t;
+  const seen = new Set<TypeNode>();
+  while (current && !seen.has(current)) {
+    seen.add(current); // self-referential aliases are a type error, but don't hang
+    const ref = current.asKind(SyntaxKind.TypeReference);
+    if (!ref || ref.getTypeArguments().length > 0) break;
+    let decl;
+    try {
+      const sym = ref.getTypeName().getSymbol();
+      decl = (sym?.getAliasedSymbol() ?? sym)?.getDeclarations()?.[0];
+    } catch {
+      break; // unresolvable import
+    }
+    if (!decl || !Node.isTypeAliasDeclaration(decl)) break;
+    if (decl.getTypeParameters().length > 0) break;
+    const next = decl.getTypeNode();
+    if (!next) break;
+    current = next;
+  }
+  return current;
+}
+
 /** String literal value of a literal type node, e.g. `"topdown"`. */
 export function strOf(t: TypeNode | undefined): string | undefined {
   const lit = t?.asKind(SyntaxKind.LiteralType)?.getLiteral();

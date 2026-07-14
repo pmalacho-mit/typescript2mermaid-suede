@@ -9,6 +9,7 @@ import {
   numOf,
   numericLiteralProps,
   qualifierOf,
+  resolveAlias,
   resolveMembers,
   strOf,
   tupleOf,
@@ -66,28 +67,32 @@ export function generateFromSourceFile(sf: SourceFile): EmittedDiagram[] {
 
 function renderDiagram(body: TypeNode, options?: TypeNode): string {
   const prefix = renderOptions(options);
-  if (lastName(body) !== "Diagram")
+  // `Render<Flow>` where `type Flow = Flowchart.Diagram<...>` should behave
+  // exactly like inlining the alias — this is how one diagram gets reused across
+  // several Render<> aliases that differ only in options (see examples/flowchart/themes.ts).
+  const diagram = resolveAlias(body) ?? body;
+  if (lastName(diagram) !== "Diagram")
     fail(`Render<> expects a <Family>.Diagram<...> type`, body);
-  const kind = qualifierOf(body);
+  const kind = qualifierOf(diagram);
   switch (kind) {
     case "Flowchart":
-      return prefix + renderFlowchart(body);
+      return prefix + renderFlowchart(diagram);
     case "Sequence":
-      return prefix + renderSequence(body);
+      return prefix + renderSequence(diagram);
     case "ClassDiagram":
-      return prefix + renderClassDiagram(body);
+      return prefix + renderClassDiagram(diagram);
     case "State":
-      return prefix + renderState(body);
+      return prefix + renderState(diagram);
     case "Entity":
-      return prefix + renderER(body);
+      return prefix + renderER(diagram);
     case "Journey":
-      return prefix + renderJourney(body);
+      return prefix + renderJourney(diagram);
     case "Pie":
-      return prefix + renderPie(body);
+      return prefix + renderPie(diagram);
     case "Gantt":
-      return prefix + renderGantt(body);
+      return prefix + renderGantt(diagram);
     default:
-      fail(`unknown diagram kind \`${kind ?? body.getText()}\``, body);
+      fail(`unknown diagram kind \`${kind ?? diagram.getText()}\``, diagram);
   }
 }
 

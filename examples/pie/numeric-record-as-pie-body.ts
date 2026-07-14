@@ -8,4 +8,6 @@ type MonthlyAwsCosts = {
   "CloudWatch/Monitoring": 5;
 };
 
-export type AwsCosts = Render<Pie.Diagram<"Monthly AWS Costs", MonthlyAwsCosts>>;
+export type AwsCosts = Render<
+  Pie.Diagram<"Monthly AWS Costs", MonthlyAwsCosts>
+>;

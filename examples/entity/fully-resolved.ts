@@ -43,9 +43,13 @@ type Category = {
   parent_category_id: Entity.Key.Foreign<Entity.Integer>;
 };
 
-export type OrderSchema = Render<Entity.Diagram<[
-  Entity.Relation<User, Order, "one-to-zero-or-many", "places">,
-  Entity.Relation<Order, OrderItem, "one-to-many", "contains">,
-  Entity.Relation<Product, OrderItem, "one-to-zero-or-many", "ordered in">,
-  Entity.Relation<Category, Product, "one-to-zero-or-many", "categorizes">,
-]>>;
+export type OrderSchema = Render<
+  Entity.Diagram<
+    [
+      Entity.Relation<User, Order, "one-to-zero-or-many", "places">,
+      Entity.Relation<Order, OrderItem, "one-to-many", "contains">,
+      Entity.Relation<Product, OrderItem, "one-to-zero-or-many", "ordered in">,
+      Entity.Relation<Category, Product, "one-to-zero-or-many", "categorizes">,
+    ]
+  >
+>;

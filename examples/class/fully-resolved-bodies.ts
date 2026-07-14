@@ -14,7 +14,11 @@ type AppUser = {
   validateEmail: ClassDiagram.Protected<() => boolean>;
 };
 
-export type UserClass = Render<ClassDiagram.Diagram<[
-  // Class<AppUser> alone would work; the relation includes both ends too.
-  ClassDiagram.Association<AppUser, Credentials, "authenticates with">,
-]>>;
+export type UserClass = Render<
+  ClassDiagram.Diagram<
+    [
+      // Class<AppUser> alone would work; the relation includes both ends too.
+      ClassDiagram.Association<AppUser, Credentials, "authenticates with">,
+    ]
+  >
+>;

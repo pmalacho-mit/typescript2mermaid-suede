@@ -288,10 +288,49 @@ export function previewHtml(
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${n}';">
   <style>
-    body { padding: 2rem; font-family: var(--vscode-font-family); }
-    #diagram { display: flex; justify-content: center; }
-    #diagram svg { max-width: 100%; height: auto; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex;
+      flex-direction: column;
+      color: var(--vscode-editor-foreground);
+      font-family: var(--vscode-font-family);
+      font-size: var(--vscode-font-size);
+    }
+    #toolbar {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.35rem 0.5rem;
+      border-bottom: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+    }
+    #toolbar button {
+      background: var(--vscode-button-secondaryBackground, transparent);
+      color: var(--vscode-button-secondaryForeground, inherit);
+      border: 1px solid var(--vscode-panel-border, rgba(128,128,128,0.35));
+      border-radius: 4px;
+      padding: 0.15rem 0.5rem;
+      min-width: 1.9rem;
+      cursor: pointer;
+      font: inherit;
+      line-height: 1.4;
+    }
+    #toolbar button:hover {
+      background: var(--vscode-button-secondaryHoverBackground, rgba(128,128,128,0.2));
+    }
+    #zoom-level {
+      min-width: 3.4rem;
+      text-align: center;
+      opacity: 0.85;
+      font-variant-numeric: tabular-nums;
+    }
+    #hint { margin-left: auto; opacity: 0.6; font-size: 0.85em; }
+    /* The viewport clips; #canvas is what actually moves and scales. */
+    #viewport { flex: 1 1 auto; position: relative; overflow: hidden; cursor: grab; }
+    #viewport.panning { cursor: grabbing; }
+    #canvas { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
     #error {
+      margin: 1rem;
       white-space: pre-wrap;
       font-family: var(--vscode-editor-font-family, monospace);
       color: var(--vscode-errorForeground);
@@ -303,7 +342,15 @@ export function previewHtml(
   </style>
 </head>
 <body>
-  <div id="diagram"></div>
+  <div id="toolbar" hidden>
+    <button id="zoom-out" title="Zoom out">&#8722;</button>
+    <span id="zoom-level">100%</span>
+    <button id="zoom-in" title="Zoom in">+</button>
+    <button id="fit" title="Fit diagram to window">Fit</button>
+    <button id="reset" title="Actual size">1:1</button>
+    <span id="hint">drag to pan &middot; scroll to move &middot; ctrl/&#8984; + scroll to zoom</span>
+  </div>
+  <div id="viewport" hidden><div id="canvas"></div></div>
   <div id="error" hidden></div>
   <script nonce="${n}" src="${mermaidScriptUri}" onerror="window.__tsmScriptFailed = true"></script>
   <script nonce="${n}">
@@ -322,6 +369,11 @@ export function previewHtml(
         post("CSP VIOLATION: blocked=" + e.blockedURI + " directive=" + e.violatedDirective));
 
       const errorEl = document.getElementById("error");
+      const toolbar = document.getElementById("toolbar");
+      const viewport = document.getElementById("viewport");
+      const canvas = document.getElementById("canvas");
+      const zoomLevel = document.getElementById("zoom-level");
+
       function fail(message) {
         post("FAILED: " + message);
         errorEl.hidden = false;
@@ -337,6 +389,128 @@ export function previewHtml(
         fail("Failed to load mermaid.min.js.\\nThe webview could not fetch the extension asset — re-run the build and reinstall.");
         return;
       }
+
+      /* ------------------------- pan / zoom ------------------------- */
+
+      const MIN_SCALE = 0.1, MAX_SCALE = 8;
+      let scale = 1, tx = 0, ty = 0;
+      let natW = 0, natH = 0;
+      // Once the view is deliberately positioned, a resize must not yank it back.
+      let userAdjusted = false;
+
+      const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+      function apply() {
+        canvas.style.transform =
+          "translate(" + tx + "px," + ty + "px) scale(" + scale + ")";
+        zoomLevel.textContent = Math.round(scale * 100) + "%";
+      }
+
+      // Keep the point under the cursor fixed while the scale changes.
+      function zoomAt(cx, cy, factor) {
+        const next = clamp(scale * factor, MIN_SCALE, MAX_SCALE);
+        if (next === scale) return;
+        tx = cx - (cx - tx) * (next / scale);
+        ty = cy - (cy - ty) * (next / scale);
+        scale = next;
+        userAdjusted = true;
+        apply();
+      }
+
+      function centerAt(s) {
+        const r = viewport.getBoundingClientRect();
+        scale = clamp(s, MIN_SCALE, MAX_SCALE);
+        tx = (r.width - natW * scale) / 2;
+        ty = (r.height - natH * scale) / 2;
+        apply();
+      }
+
+      function fit() {
+        const r = viewport.getBoundingClientRect();
+        const pad = 24;
+        // Never scale a small diagram up past 1:1 just to fill the panel.
+        const s = Math.min((r.width - pad * 2) / natW, (r.height - pad * 2) / natH, 1);
+        centerAt(s);
+        userAdjusted = false;
+      }
+
+      function mount(svgText) {
+        canvas.innerHTML = svgText;
+        const svg = canvas.querySelector("svg");
+        if (!svg) { fail("mermaid returned no <svg>"); return; }
+        // Mermaid emits width=100% + an inline max-width, which fights a scale
+        // transform. Pin the SVG to its intrinsic viewBox size instead.
+        const vb = svg.viewBox && svg.viewBox.baseVal;
+        natW = (vb && vb.width) || svg.getBoundingClientRect().width || 800;
+        natH = (vb && vb.height) || svg.getBoundingClientRect().height || 600;
+        svg.removeAttribute("width");
+        svg.removeAttribute("height");
+        svg.style.maxWidth = "none";
+        svg.style.width = natW + "px";
+        svg.style.height = natH + "px";
+        svg.style.display = "block";
+        toolbar.hidden = false;
+        viewport.hidden = false;
+        fit();
+      }
+
+      document.getElementById("zoom-in").addEventListener("click", () => {
+        const r = viewport.getBoundingClientRect();
+        zoomAt(r.width / 2, r.height / 2, 1.25);
+      });
+      document.getElementById("zoom-out").addEventListener("click", () => {
+        const r = viewport.getBoundingClientRect();
+        zoomAt(r.width / 2, r.height / 2, 1 / 1.25);
+      });
+      document.getElementById("fit").addEventListener("click", fit);
+      document.getElementById("reset").addEventListener("click", () => {
+        centerAt(1);
+        userAdjusted = true;
+      });
+
+      viewport.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const r = viewport.getBoundingClientRect();
+        if (e.ctrlKey || e.metaKey) {
+          zoomAt(e.clientX - r.left, e.clientY - r.top, e.deltaY < 0 ? 1.1 : 1 / 1.1);
+        } else {
+          tx -= e.deltaX;
+          ty -= e.deltaY;
+          userAdjusted = true;
+          apply();
+        }
+      }, { passive: false });
+
+      let panning = false, startX = 0, startY = 0;
+      viewport.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        panning = true;
+        startX = e.clientX - tx;
+        startY = e.clientY - ty;
+        viewport.classList.add("panning");
+        try { viewport.setPointerCapture(e.pointerId); } catch (_) {}
+      });
+      viewport.addEventListener("pointermove", (e) => {
+        if (!panning) return;
+        tx = e.clientX - startX;
+        ty = e.clientY - startY;
+        userAdjusted = true;
+        apply();
+      });
+      function endPan(e) {
+        if (!panning) return;
+        panning = false;
+        viewport.classList.remove("panning");
+        try { viewport.releasePointerCapture(e.pointerId); } catch (_) {}
+      }
+      viewport.addEventListener("pointerup", endPan);
+      viewport.addEventListener("pointercancel", endPan);
+
+      window.addEventListener("resize", () => {
+        if (natW && !userAdjusted) fit();
+      });
+
+      /* --------------------------- render --------------------------- */
 
       const dark =
         document.body.classList.contains("vscode-dark") ||
@@ -357,8 +531,9 @@ export function previewHtml(
       mermaid
         .render("tsm-diagram", ${JSON.stringify(code)})
         .then(({ svg }) => {
-          document.getElementById("diagram").innerHTML = svg;
-          post("render OK (" + svg.length + " chars of svg)");
+          mount(svg);
+          post("render OK (" + svg.length + " chars of svg, " +
+               Math.round(natW) + "x" + Math.round(natH) + " natural)");
         })
         .catch((e) => fail("mermaid.render rejected: " + ((e && e.message) || e)));
     })();

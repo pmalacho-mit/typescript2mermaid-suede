@@ -8,9 +8,14 @@ type E = {};
 type F = {};
 type G = {};
 
-export type LabeledEdges = Render<Flowchart.Diagram<"topdown", [
-  Flowchart.Connect<A, B, "Yes">,
-  Flowchart.Connect<A, C, "No">,
-  Flowchart.Connect<D, E, "maybe", "dotted">,
-  Flowchart.Connect<F, G, "always", "thick">,
-]>>;
+export type LabeledEdges = Render<
+  Flowchart.Diagram<
+    "topdown",
+    [
+      Flowchart.Connect<A, B, "Yes">,
+      Flowchart.Connect<A, C, "No">,
+      Flowchart.Connect<D, E, "maybe", "dotted">,
+      Flowchart.Connect<F, G, "always", "thick">,
+    ]
+  >
+>;
