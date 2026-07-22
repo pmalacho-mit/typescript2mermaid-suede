@@ -24,23 +24,21 @@ bash <(curl https://raw.githubusercontent.com/pmalacho-mit/suede/refs/heads/main
 Author GitHub-compatible [Mermaid](https://mermaid.js.org) diagrams as **TypeScript types**, then generate them with the TypeScript compiler.
 
 ```ts
-import type { Render, Flowchart } from "typescript2mermaid";
+import type { Flowchart } from "typescript2mermaid";
 
 type A = {};
 type B = {};
 type C = {};
 type D = {};
 
-type Example = Render<
-  Flowchart.Diagram<
-    "topdown",
-    [
-      Flowchart.Connect<A, B>,
-      Flowchart.Connect<A, C>,
-      Flowchart.Connect<B, D>,
-      Flowchart.Connect<C, D>,
-    ]
-  >
+export type Example = Flowchart.Diagram<
+  "topdown",
+  [
+    Flowchart.Connect<A, B>,
+    Flowchart.Connect<A, C>,
+    Flowchart.Connect<B, D>,
+    Flowchart.Connect<C, D>,
+  ]
 >;
 ```
 
@@ -67,7 +65,7 @@ type A = { id: string };
 type B = { name: string };
 type C = A & B;
 
-type Resolved = Render<Flowchart.Diagram<"leftright", C>>;
+export type Resolved = Flowchart.Diagram<"leftright", C>;
 ```
 
 ```
@@ -83,22 +81,30 @@ The intersection is flattened by the checker; the node carries its complete shap
 typescript2mermaid <files...> [-o output.md] [--project tsconfig.json]
 ```
 
-Every `type X = Render<...>` alias found in the given files is emitted as a `### X` heading plus a fenced ` ```mermaid ` block. Without `-o`, markdown goes to stdout. There is also a programmatic API: `generateFromFiles`, `generateFromSource`, `generateFromSourceFile`.
+Every **exported** type alias whose type is a `<Family>.Diagram<...>` is emitted as a `### X` heading plus a fenced ` ```mermaid ` block. (Non-exported diagram aliases are treated as helpers — e.g. a body shared across several themed variants.) Without `-o`, markdown goes to stdout. There is also a programmatic API via `generateFrom`.
 
 ## Supported diagrams
 
 All eight diagram families from the GitHub-supported Mermaid set. Each family lives in its own namespace whose `Diagram` type is the root, and whose `Statement` union constrains what its body accepts — **the type constraints are the documentation**: an invalid statement, direction, cardinality, or score is a compile error. See `examples/` for a DSL rendition of every example in [this Mermaid fundamentals tutorial](https://gist.github.com/GingerGraham/66a1e586fe2addbc6375b1fba1d2818c); all generated output parses cleanly against the Mermaid parser (`node validate.mjs examples/output.md`).
 
+Each family's `Diagram` takes an optional final `Options<...>` type argument:
+
 ```ts
-type Render<D extends AnyDiagram, Options extends readonly RenderOption[] = []>
+Flowchart.Diagram<"topdown", [...], Options<[Theme<"dark">]>>
 ```
 
-`AnyDiagram` is the union of all `<Family>.Diagram` types. Options: `[Theme<"dark">]` emits an `%%{init}%%` directive (`default`, `dark`, `forest`, `neutral`).
+`Options<[Theme<"dark">]>` emits an `%%{init}%%` directive (`default`, `dark`, `forest`, `neutral`). The `Options<...>` wrapper is a marker the generator locates by key, so it works regardless of how many arguments a family's `Diagram` takes. Reuse one body across themed variants by naming it and passing different options:
+
+```ts
+type Body = [Flowchart.Connect<A, B>];
+export type Light = Flowchart.Diagram<"topdown", Body>;
+export type Dark = Flowchart.Diagram<"topdown", Body, Options<[Theme<"dark">]>>;
+```
 
 ### Flowchart
 
 ```ts
-Flowchart.Diagram<Direction, Body extends AnyNode | readonly Flowchart.Statement[]>
+Flowchart.Diagram<Direction, Body extends AnyNode | readonly Flowchart.Statement[], Options<...>?>
 ```
 
 `Flowchart.Direction`: `"topdown" | "bottomup" | "leftright" | "rightleft"`. Body is a single node type or a tuple of statements:
@@ -120,7 +126,7 @@ Node labels: if a node's resolved type has members and no explicit label, the la
 ### Sequence
 
 ```ts
-Render<Sequence.Diagram<[
+Sequence.Diagram<[
   Sequence.Participant<User, "User">,                  // or Sequence.Actor<...>
   Sequence.Message<User, API, "Login", "activate">,    // ->> (opens activation box on target)
   Sequence.Reply<API, User, "OK", "deactivate">,       // -->> (closes source's activation box)
@@ -128,7 +134,7 @@ Render<Sequence.Diagram<[
   Sequence.Async<User, API, "fire and forget">,        // -)
   Sequence.NoteOver<[User, API], "Auth flow">,         // also NoteRight<T, "...">, NoteLeft
   Sequence.Loop<"Every 30s", [...]>,                   // also Optional<...>, Alternative<label, body, elseLabel, elseBody>
-]>>
+]>
 ```
 
 Loop/Optional/Alternative bodies are themselves `readonly Sequence.Statement[]`, so nesting stays fully checked.
@@ -139,31 +145,29 @@ Loop/Optional/Alternative bodies are themselves `readonly Sequence.Statement[]`,
 type Animal = { name: string; makeSound(): void };
 type Dog = Animal & { bark(): void };
 
-Render<
-  ClassDiagram.Diagram<
-    [
-      ClassDiagram.Extends<Dog, Animal>, // Animal <|-- Dog
-      ClassDiagram.Composition<Whole, Part>, // *--   Aggregation<...> o--
-      ClassDiagram.Association<Owner, Animal, "owns">, // -->   Link<...> --
-      ClassDiagram.DependsOn<A, B>, // ..>   Realizes ..|>   Implements --|>
-      ClassDiagram.Class<Orphan>, // include a class with no relations
-    ]
-  >
+Class.Diagram<
+  [
+    Class.Extends<Dog, Animal>, // Animal <|-- Dog
+    Class.Composition<Whole, Part>, // *--   Aggregation<...> o--
+    Class.Association<Owner, Animal, "owns">, // -->   Link<...> --
+    Class.DependsOn<A, B>, // ..>   Realizes ..|>   Implements --|>
+    Class.Class<Orphan>, // include a class with no relations
+  ]
 >;
 ```
 
-Every referenced type expands into a full `class` body from its _resolved_ type — `Dog` lists `name`, `makeSound()`, and `bark()`. Function-typed members render as methods with parameters and return types. Visibility uses identity marker types on members: `ClassDiagram.Private<T>` (`-`), `ClassDiagram.Protected<T>` (`#`), `ClassDiagram.Internal<T>` (`~`); default is `+`.
+Every referenced type expands into a full `class` body from its _resolved_ type — `Dog` lists `name`, `makeSound()`, and `bark()`. Function-typed members render as methods with parameters and return types. Visibility uses identity marker types on members: `Class.Private<T>` (`-`), `Class.Protected<T>` (`#`), `Class.Internal<T>` (`~`); default is `+`.
 
 ### State diagram
 
 ```ts
-Render<State.Diagram<[
+State.Diagram<[
   State.Transition<State.Start, Idle>,      // [*] --> Idle
   State.Transition<Idle, Processing, "start">,
   State.Transition<Success, State.End>,     // Success --> [*]
   State.Composite<Active, [State.Transition<State.Start, Running>, ...]>,
   State.Note<Locked, "right", "Locked after 3 attempts">,
-]>>
+]>
 ```
 
 `State.Start` and `State.End` are pseudo-state markers rendering as `[*]`.
@@ -177,13 +181,11 @@ type USER = {
   created_at: Entity.DateTime;
 };
 
-Render<
-  Entity.Diagram<
-    [
-      Entity.Relation<USER, ORDER, "one-to-zero-or-many", "places">,
-      Entity.Include<STANDALONE>,
-    ]
-  >
+Entity.Diagram<
+  [
+    Entity.Relation<USER, ORDER, "one-to-zero-or-many", "places">,
+    Entity.Include<STANDALONE>,
+  ]
 >;
 ```
 
@@ -192,39 +194,35 @@ Render<
 ### Journey, Pie, Gantt
 
 ```ts
-Render<
-  Journey.Diagram<
-    "Title",
-    [
-      Journey.Section<
-        "Discovery",
-        [
-          Journey.Task<"Visit homepage", 5, [User, "QA Engineer"]>, // scores: Journey.Satisfaction = 1-5
-        ]
-      >,
-    ]
-  >
+Journey.Diagram<
+  "Title",
+  [
+    Journey.Section<
+      "Discovery",
+      [
+        Journey.Task<"Visit homepage", 5, [User, "QA Engineer"]>, // scores: Journey.Satisfaction = 1-5
+      ]
+    >,
+  ]
 >;
 
-Render<Pie.Diagram<"Costs", [Pie.Slice<"EC2", 45>, Pie.Slice<"RDS", 25>]>>;
+Pie.Diagram<"Costs", [Pie.Slice<"EC2", 45>, Pie.Slice<"RDS", 25>]>;
 // or derive slices from a type's numeric-literal properties:
 type Costs = { "EC2 Instances": 45; "RDS Database": 25 };
-Render<Pie.Diagram<"Costs", Costs>>;
+Pie.Diagram<"Costs", Costs>;
 
-Render<
-  Gantt.Diagram<
-    "Title",
-    "YYYY-MM-DD",
-    [
-      Gantt.Section<
-        "Planning",
-        [
-          Gantt.Task<"Requirements", "req", "2024-01-01", "2024-01-15", "done">,
-          Gantt.Task<"Design", "design", Gantt.After<"req">, "10d">, // Gantt.Status: done | active | crit
-        ]
-      >,
-    ]
-  >
+Gantt.Diagram<
+  "Title",
+  "YYYY-MM-DD",
+  [
+    Gantt.Section<
+      "Planning",
+      [
+        Gantt.Task<"Requirements", "req", "2024-01-01", "2024-01-15", "done">,
+        Gantt.Task<"Design", "design", Gantt.After<"req">, "10d">, // Gantt.Status: done | active | crit
+      ]
+    >,
+  ]
 >;
 ```
 
@@ -232,7 +230,7 @@ Journey task actors may be type references or string literals (for names with sp
 
 ## VSCode integration
 
-The `vscode-extension/` directory contains a companion extension: hovering a `Render<...>` alias shows the generated Mermaid source inline, with a code lens / hover link that opens the fully rendered diagram in a side panel (Mermaid bundled locally, theme-aware). See `vscode-extension/README.md` for build-and-run steps. The extension is a thin client over the library's `GeneratorSession` API — a long-lived project that accepts unsaved buffer text, which other editor integrations can reuse.
+The `vscode-extension/` directory contains a companion extension: hovering a `<Family>.Diagram<...>` alias shows the generated Mermaid source inline, with a code lens / hover link that opens the fully rendered diagram in a side panel (Mermaid bundled locally, theme-aware). See `vscode-extension/README.md` for build-and-run steps. The extension is a thin client over the library's `GeneratorSession` API — a long-lived project that accepts unsaved buffer text, which other editor integrations can reuse.
 
 ## How it works
 

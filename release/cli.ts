@@ -9,7 +9,7 @@
  * or to a markdown file with -o.
  */
 import { writeFileSync } from "node:fs";
-import { generateFromFiles } from "./generate.js";
+import { generateFrom } from "./generate.js";
 
 function main(argv: string[]): void {
   const files: string[] = [];
@@ -25,7 +25,7 @@ function main(argv: string[]): void {
   }
   if (files.length === 0) return usage(1);
 
-  const diagrams = generateFromFiles(files, project);
+  const diagrams = generateFrom.files(files, project);
   if (diagrams.length === 0) {
     console.error("typescript2mermaid: no `Diagram<...>` type aliases found.");
     process.exitCode = 1;

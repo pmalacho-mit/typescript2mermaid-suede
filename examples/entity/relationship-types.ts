@@ -1,4 +1,4 @@
-import type { Render, Entity } from "../../release/dsl.js";
+import type { Entity } from "../../release/entity.js";
 
 type Customer = { id: Entity.Key.Primary<Entity.Integer>; name: Entity.Text };
 type Invoice = {
@@ -17,13 +17,11 @@ type Item = {
   supplier_id: Entity.Key.Foreign<Entity.Integer>;
 };
 
-export type Cardinalities = Render<
-  Entity.Diagram<
-    [
-      Entity.Relation<Customer, Sale, "one-to-zero-or-many", "1 to many">,
-      Entity.Relation<Sale, Invoice, "one-to-one", "1 to 1">,
-      Entity.Relation<Item, Supplier, "many-to-one", "many to 1">,
-      Entity.Relation<Student, Course, "many-to-many", "many to many">,
-    ]
-  >
+export type Cardinalities = Entity.Diagram<
+  [
+    Entity.Relation<Customer, Sale, "one-to-zero-or-many", "1 to many">,
+    Entity.Relation<Sale, Invoice, "one-to-one", "1 to 1">,
+    Entity.Relation<Item, Supplier, "many-to-one", "many to 1">,
+    Entity.Relation<Student, Course, "many-to-many", "many to many">,
+  ]
 >;

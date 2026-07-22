@@ -1,20 +1,34 @@
-import type { Render, Flowchart, Theme } from "../../release/dsl.js";
+import type { Flowchart, Render } from "../../release";
 
 type A = {};
 type B = {};
 type C = {};
 
-type Flow = Flowchart.Diagram<
+// A reusable body shared across the themed variants below.
+type Body = [Flowchart.Connect<A, B>, Flowchart.Connect<B, C>];
+
+export type Default = Flowchart.Diagram<"topdown", Body>;
+
+export type DefaultExplicit = Flowchart.Diagram<
   "topdown",
-  [Flowchart.Connect<A, B>, Flowchart.Connect<B, C>]
+  Body,
+  Render.Options<[Render.Theme<"default">]>
 >;
 
-export type Default = Render<Flow>;
+export type Dark = Flowchart.Diagram<
+  "topdown",
+  Body,
+  Render.Options<[Render.Theme<"dark">]>
+>;
 
-export type DefaultExplicit = Render<Flow, [Theme<"default">]>;
+export type Forest = Flowchart.Diagram<
+  "topdown",
+  Body,
+  Render.Options<[Render.Theme<"forest">]>
+>;
 
-export type Dark = Render<Flow, [Theme<"dark">]>;
-
-export type Forest = Render<Flow, [Theme<"forest">]>;
-
-export type Neutral = Render<Flow, [Theme<"neutral">]>;
+export type Neutral = Flowchart.Diagram<
+  "topdown",
+  Body,
+  Render.Options<[Render.Theme<"neutral">]>
+>;

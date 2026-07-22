@@ -1,6 +1,6 @@
 # typescript2mermaid for VSCode
 
-Hover any `Render<...>` type alias (or the `Render` keyword on its declaration line) to see the generated Mermaid source, and click **Preview rendered diagram** — or the code lens above the alias — to open the fully drawn diagram in a side panel.
+Hover any exported `<Family>.Diagram<...>` type alias (or anywhere on its declaration line) to see the generated Mermaid source, and click **Preview rendered diagram** — or the code lens above the alias — to open the fully drawn diagram in a side panel.
 
 ## Install (consumers of the vendored library)
 

@@ -1,4 +1,4 @@
-import type { Render, Pie } from "../../release/dsl.js";
+import type { Pie } from "../../release/pie.js";
 
 type MonthlyAwsCosts = {
   "EC2 Instances": 45;
@@ -8,6 +8,4 @@ type MonthlyAwsCosts = {
   "CloudWatch/Monitoring": 5;
 };
 
-export type AwsCosts = Render<
-  Pie.Diagram<"Monthly AWS Costs", MonthlyAwsCosts>
->;
+export type AwsCosts = Pie.Diagram<"Monthly AWS Costs", MonthlyAwsCosts>;

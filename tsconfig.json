@@ -10,5 +10,9 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["release"]
+  "include": ["release"],
+  // The VS Code extension is a separate build with its own tsconfig (it maps
+  // `typescript2mermaid-lib` to ../index.ts and bundles via esbuild), so it
+  // must not be typechecked as part of the library.
+  "exclude": ["release/vscode-extension"]
 }

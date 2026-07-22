@@ -1,7 +1,7 @@
-import type { Render, Flowchart } from "../../release/dsl.js";
+import type { Flowchart } from "../../release/flowchart.js";
 
 type A = { id: string };
 type B = { name: string };
 type C = A & B;
 
-export type ResolvedIntersection = Render<Flowchart.Diagram<"leftright", C>>;
+export type ResolvedIntersection = Flowchart.Diagram<"leftright", C>;

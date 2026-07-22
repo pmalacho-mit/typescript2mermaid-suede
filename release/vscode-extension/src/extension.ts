@@ -60,7 +60,7 @@ async function diagramsFor(
 
 /** Cheap gate so we never parse documents that can't contain diagrams. */
 function mightHaveDiagrams(doc: vscode.TextDocument): boolean {
-  return doc.getText().includes("Render<");
+  return doc.getText().includes(".Diagram<");
 }
 
 /* ------------------------------ hover -------------------------------- */
@@ -70,7 +70,7 @@ const SELECTOR: vscode.DocumentSelector = [
   { language: "typescriptreact" },
 ];
 
-class RenderHoverProvider implements vscode.HoverProvider {
+class DiagramHoverProvider implements vscode.HoverProvider {
   async provideHover(
     doc: vscode.TextDocument,
     pos: vscode.Position,
@@ -79,23 +79,25 @@ class RenderHoverProvider implements vscode.HoverProvider {
     const range = doc.getWordRangeAtPosition(pos);
     if (!range) return;
 
-    let word = doc.getText(range);
-    // Hovering the `Render` keyword itself resolves to the enclosing alias.
-    if (word === "Render") {
-      const aliasMatch = /type\s+([A-Za-z_$][\w$]*)\s*=/.exec(
-        doc.lineAt(pos.line).text,
-      );
-      if (!aliasMatch) return;
-      word = aliasMatch[1];
-    }
-
     let diagrams: EmittedDiagram[];
     try {
       diagrams = await diagramsFor(doc);
     } catch {
       return; // mid-edit syntax errors etc. — stay quiet
     }
-    const diagram = diagrams.find((d) => d.name === word);
+
+    const word = doc.getText(range);
+    // Hovering the alias name resolves directly. Otherwise, hovering anywhere
+    // on the declaration line — the family, `Diagram`, an argument — resolves
+    // to the alias declared on that line.
+    const diagram =
+      diagrams.find((d) => d.name === word) ??
+      (() => {
+        const alias = /type\s+([A-Za-z_$][\w$]*)\s*=/.exec(
+          doc.lineAt(pos.line).text,
+        )?.[1];
+        return alias ? diagrams.find((d) => d.name === alias) : undefined;
+      })();
     if (!diagram) return;
 
     const md = new vscode.MarkdownString();
@@ -114,7 +116,7 @@ class RenderHoverProvider implements vscode.HoverProvider {
 
 /* ---------------------------- code lenses ---------------------------- */
 
-class RenderCodeLensProvider implements vscode.CodeLensProvider {
+class DiagramCodeLensProvider implements vscode.CodeLensProvider {
   async provideCodeLenses(
     doc: vscode.TextDocument,
   ): Promise<vscode.CodeLens[]> {
@@ -146,13 +148,29 @@ class RenderCodeLensProvider implements vscode.CodeLensProvider {
 /* ----------------------------- preview ------------------------------- */
 
 /**
- * Open panels, keyed by document + diagram name.
+ * An open preview panel and the files whose edits should re-render it.
  *
  * Every entry owns a webview running its own ~3.5MB Mermaid bundle, so a panel
  * is a genuinely expensive object: we reuse one whenever the same diagram is
  * previewed again rather than stacking duplicates.
  */
-const previews = new Map<string, vscode.WebviewPanel>();
+interface Preview {
+  panel: vscode.WebviewPanel;
+  uriString: string;
+  name: string;
+  /**
+   * The previewed file plus its transitive imports. A diagram's nodes are
+   * usually types declared in *other* modules — the checker resolves them at
+   * generation time — so watching only the previewed file would miss the edits
+   * that actually change the output.
+   */
+  deps: Set<string>;
+  /** Last Mermaid pushed, so an edit that doesn't alter the diagram is a no-op. */
+  code: string;
+}
+
+/** Open panels, keyed by document + diagram name. */
+const previews = new Map<string, Preview>();
 
 const previewKey = (uriString: string, name: string) => `${uriString}::${name}`;
 
@@ -229,7 +247,7 @@ async function openPreview(
   }
 
   const key = previewKey(uriString, name);
-  let panel = previews.get(key);
+  let panel = previews.get(key)?.panel;
   if (panel) {
     log("  reusing existing panel");
     panel.reveal(panel.viewColumn ?? vscode.ViewColumn.Beside, true);
@@ -244,10 +262,9 @@ async function openPreview(
         localResourceRoots: [vscode.Uri.file(path.dirname(mermaidPath))],
       },
     );
-    previews.set(key, panel);
     panel.onDidDispose(() => {
       log(`preview closed: ${name}`);
-      previews.delete(key);
+      closePreview(key);
     });
     // The webview reports its own progress and failures back over this channel.
     panel.webview.onDidReceiveMessage((m) => {
@@ -260,11 +277,157 @@ async function openPreview(
   log(`  script URI: ${scriptUri.toString()}`);
 
   // Assigning html reloads the webview, so a reused panel picks up edits made
-  // since it was opened.
+  // since it was opened. (Later updates are pushed as messages instead.)
   const html = previewHtml(panel.webview, scriptUri.toString(), diagram.code);
   log(`  cspSource: ${panel.webview.cspSource}`);
   log(`  html assigned (${html.length} chars); waiting on webview...`);
   panel.webview.html = html;
+
+  openPreviewTracking(key, {
+    panel,
+    uriString,
+    name,
+    deps: dependenciesOf(sessionFor(doc), doc.uri.fsPath),
+    code: diagram.code,
+  });
+}
+
+/* --------------------------- live updates ---------------------------- */
+
+/** Coalesce the burst of events a single keystroke produces. */
+const REFRESH_DEBOUNCE_MS = 250;
+let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+const changedFiles = new Set<string>();
+
+/** Catches on-disk edits: external tools, or files with no editor open. */
+let fsWatcher: vscode.FileSystemWatcher | undefined;
+
+function openPreviewTracking(key: string, preview: Preview): void {
+  previews.set(key, preview);
+  log(`  watching ${preview.deps.size} source file(s) for ${preview.name}`);
+  if (fsWatcher) return;
+  fsWatcher = vscode.workspace.createFileSystemWatcher("**/*.{ts,tsx}");
+  const onFs = (uri: vscode.Uri) => noteSourceChanged(uri.fsPath);
+  fsWatcher.onDidChange(onFs);
+  fsWatcher.onDidCreate(onFs);
+  fsWatcher.onDidDelete(onFs);
+  log("live: file watcher started");
+}
+
+function closePreview(key: string): void {
+  previews.delete(key);
+  // Nothing to watch for once the last panel is gone.
+  if (previews.size === 0 && fsWatcher) {
+    fsWatcher.dispose();
+    fsWatcher = undefined;
+    log("live: file watcher stopped");
+  }
+}
+
+/**
+ * ts-morph always reports forward-slash paths while VS Code's `fsPath` uses the
+ * platform separator, so the two must be normalized before they can be compared
+ * — otherwise every dependency lookup silently misses on Windows.
+ */
+const normalizePath = (p: string) => p.replace(/\\/g, "/");
+
+/** The previewed file plus its transitive imports, limited to files a user edits. */
+function dependenciesOf(
+  session: GeneratorSession,
+  fsPath: string,
+): Set<string> {
+  try {
+    return new Set(
+      session
+        .dependencies(fsPath)
+        .filter((f) => !f.includes("node_modules"))
+        .map(normalizePath),
+    );
+  } catch (e) {
+    log(`live: dependency scan failed for ${fsPath} — ${(e as Error).message}`);
+    return new Set([normalizePath(fsPath)]);
+  }
+}
+
+function noteSourceChanged(rawPath: string): void {
+  const fsPath = normalizePath(rawPath);
+  let watched = false;
+  for (const preview of previews.values())
+    if (preview.deps.has(fsPath)) watched = true;
+  if (!watched) return;
+
+  changedFiles.add(fsPath);
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    refreshTimer = undefined;
+    void refreshAffectedPreviews();
+  }, REFRESH_DEBOUNCE_MS);
+}
+
+async function refreshAffectedPreviews(): Promise<void> {
+  const files = [...changedFiles];
+  changedFiles.clear();
+  for (const preview of [...previews.values()])
+    if (files.some((f) => preview.deps.has(f)))
+      await refreshPreview(preview, files);
+}
+
+/** Push a file's newest content into the session; an open buffer beats disk. */
+function syncIntoSession(session: GeneratorSession, fsPath: string): void {
+  const open = vscode.workspace.textDocuments.find(
+    (d) => d.uri.fsPath === fsPath,
+  );
+  try {
+    session.updateFile(
+      fsPath,
+      open ? open.getText() : fs.readFileSync(fsPath, "utf8"),
+    );
+  } catch (e) {
+    // A deleted or unreadable dependency just means this pass can't improve on
+    // what's already displayed.
+    log(`live: could not read ${fsPath} — ${(e as Error).message}`);
+  }
+}
+
+async function refreshPreview(
+  preview: Preview,
+  changed: string[],
+): Promise<void> {
+  const doc = await vscode.workspace.openTextDocument(
+    vscode.Uri.parse(preview.uriString),
+  );
+  const session = sessionFor(doc);
+  for (const file of changed) syncIntoSession(session, file);
+
+  // A dependency edit doesn't bump the previewed document's version, so the
+  // version-keyed cache would happily serve the stale diagram.
+  cache.delete(doc.uri.fsPath);
+
+  let diagrams: EmittedDiagram[];
+  try {
+    diagrams = await diagramsFor(doc);
+  } catch (e) {
+    // Half-typed code is a constant state while editing; keep the last good
+    // diagram on screen rather than flashing an error at every keystroke.
+    log(`live: generation failed for ${preview.name} — ${(e as Error).message}`);
+    return;
+  }
+
+  // An edit can add or remove an import, so re-derive what to watch.
+  preview.deps = dependenciesOf(session, doc.uri.fsPath);
+
+  const diagram = diagrams.find((d) => d.name === preview.name);
+  if (!diagram) {
+    log(`live: "${preview.name}" is no longer declared in ${doc.uri.fsPath}`);
+    return;
+  }
+  if (diagram.code === preview.code) return; // edit didn't change the diagram
+  preview.code = diagram.code;
+  log(`live: re-rendering ${preview.name}`);
+  void preview.panel.webview.postMessage({
+    type: "render",
+    code: diagram.code,
+  });
 }
 
 function nonce(): string {
@@ -434,7 +597,8 @@ export function previewHtml(
         userAdjusted = false;
       }
 
-      function mount(svgText) {
+      function mount(svgText, preserveView) {
+        const hadDiagram = natW > 0;
         canvas.innerHTML = svgText;
         const svg = canvas.querySelector("svg");
         if (!svg) { fail("mermaid returned no <svg>"); return; }
@@ -451,7 +615,10 @@ export function previewHtml(
         svg.style.display = "block";
         toolbar.hidden = false;
         viewport.hidden = false;
-        fit();
+        // A live re-render must not yank a deliberately positioned view back to
+        // fit; only an untouched view (or a first render) re-fits.
+        if (preserveView && hadDiagram && userAdjusted) apply();
+        else fit();
       }
 
       document.getElementById("zoom-in").addEventListener("click", () => {
@@ -528,14 +695,32 @@ export function previewHtml(
         return;
       }
 
-      mermaid
-        .render("tsm-diagram", ${JSON.stringify(code)})
-        .then(({ svg }) => {
-          mount(svg);
-          post("render OK (" + svg.length + " chars of svg, " +
-               Math.round(natW) + "x" + Math.round(natH) + " natural)");
-        })
-        .catch((e) => fail("mermaid.render rejected: " + ((e && e.message) || e)));
+      // Mermaid keys internal state off the render id, so each pass needs a
+      // fresh one.
+      let renderSeq = 0;
+      function renderDiagram(code, preserveView) {
+        renderSeq += 1;
+        mermaid
+          .render("tsm-diagram-" + renderSeq, code)
+          .then(({ svg }) => {
+            errorEl.hidden = true;
+            mount(svg, preserveView);
+            post("render OK (" + svg.length + " chars of svg, " +
+                 Math.round(natW) + "x" + Math.round(natH) + " natural)");
+          })
+          .catch((e) => fail("mermaid.render rejected: " + ((e && e.message) || e)));
+      }
+
+      // Live updates: the extension re-generates whenever a source file behind
+      // this diagram changes and pushes the new Mermaid in. Re-rendering in
+      // place beats reassigning the panel's html, which would reload the whole
+      // Mermaid bundle and throw away the viewer's pan/zoom.
+      window.addEventListener("message", (event) => {
+        const m = event.data;
+        if (m && m.type === "render") renderDiagram(m.code, true);
+      });
+
+      renderDiagram(${JSON.stringify(code)}, false);
     })();
   </script>
 </body>
@@ -551,14 +736,21 @@ export function activate(ctx: vscode.ExtensionContext): void {
   ctx.subscriptions.push(
     out,
     vscode.commands.registerCommand("tsMermaid.showLog", () => out.show()),
-    vscode.languages.registerHoverProvider(SELECTOR, new RenderHoverProvider()),
+    vscode.languages.registerHoverProvider(SELECTOR, new DiagramHoverProvider()),
     vscode.languages.registerCodeLensProvider(
       SELECTOR,
-      new RenderCodeLensProvider(),
+      new DiagramCodeLensProvider(),
     ),
     vscode.commands.registerCommand(
       "tsMermaid.preview",
       (uriString: string, name: string) => openPreview(ctx, uriString, name),
+    ),
+
+    // Live preview: unsaved edits in any file behind an open diagram. This is
+    // the common case; the fs watcher (started with the first preview) covers
+    // changes made outside the editor.
+    vscode.workspace.onDidChangeTextDocument((e) =>
+      noteSourceChanged(e.document.uri.fsPath),
     ),
 
     // The diagram cache is keyed by path and would otherwise retain every file
@@ -570,7 +762,11 @@ export function activate(ctx: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  for (const panel of previews.values()) panel.dispose();
+  if (refreshTimer) clearTimeout(refreshTimer);
+  refreshTimer = undefined;
+  fsWatcher?.dispose();
+  fsWatcher = undefined;
+  for (const preview of previews.values()) preview.panel.dispose();
   previews.clear();
   sessions.clear();
   cache.clear();

@@ -1,4 +1,4 @@
-import type { Render, ClassDiagram } from "../../release/dsl.js";
+import type { Class } from "../../release/class.js";
 
 type Animal = {
   name: string;
@@ -13,12 +13,10 @@ type Owner = {
   addAnimal(animal: Animal): void;
 };
 
-export type AnimalHierarchy = Render<
-  ClassDiagram.Diagram<
-    [
-      ClassDiagram.Extends<Dog, Animal>,
-      ClassDiagram.Extends<Cat, Animal>,
-      ClassDiagram.Association<Owner, Animal, "owns">,
-    ]
-  >
+export type AnimalHierarchy = Class.Diagram<
+  [
+    Class.Extends<Dog, Animal>,
+    Class.Extends<Cat, Animal>,
+    Class.Association<Owner, Animal, "owns">,
+  ]
 >;
