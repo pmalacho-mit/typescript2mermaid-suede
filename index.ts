@@ -1,3 +1,11 @@
-export * from "./dsl.js";
-export { generateFromFiles, generateFromSource, generateFromSourceFile, type EmittedDiagram } from "./generate.js";
+export { generateFrom, type EmittedDiagram } from "./generate.js";
 export { GeneratorSession } from "./session.js";
+export type { Flowchart } from "./flowchart.js";
+export type { Sequence } from "./sequence.js";
+export type { Class } from "./class.js";
+export type { State } from "./state.js";
+export type { Entity } from "./entity.js";
+export type { Journey } from "./journey.js";
+export type { Pie } from "./pie.js";
+export type { Gantt } from "./gantt.js";
+export type { AnyNode, Render } from "./common.js";

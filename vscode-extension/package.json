@@ -1,7 +1,7 @@
 {
   "name": "typescript2mermaid-vscode",
   "displayName": "typescript2mermaid",
-  "description": "Hover previews and rendered diagrams for typescript2mermaid Render<...> type aliases",
+  "description": "Hover previews and rendered diagrams for typescript2mermaid <Family>.Diagram<...> type aliases",
   "version": "0.1.0",
   "publisher": "typescript2mermaid",
   "license": "MIT",
