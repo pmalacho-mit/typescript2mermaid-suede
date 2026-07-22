@@ -1,6 +1,13 @@
-import { indent, type Render } from "./common.js";
 import type { TypeNode } from "ts-morph";
-import { argsOf, fail, idOf, lastName, strOf, tupleOf } from "./parse.js";
+import {
+  indent,
+  argsOf,
+  idOf,
+  lastName,
+  strOf,
+  tupleOf,
+} from "../typescript-dsl-suede/index.js";
+import { fail, type Render } from "../common.js";
 
 export namespace State {
   /** The `[*]` start pseudo-state. */

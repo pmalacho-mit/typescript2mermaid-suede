@@ -1,14 +1,14 @@
-import { indent, type Render } from "./common.js";
 import type { TypeNode } from "ts-morph";
 import {
+  indent,
   argsOf,
-  fail,
   lastName,
   numOf,
   numericLiteralProps,
   strOf,
   tupleOf,
-} from "./parse.js";
+} from "../typescript-dsl-suede/index.js";
+import { fail, type Render } from "../common.js";
 
 export namespace Pie {
   /**

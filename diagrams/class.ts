@@ -1,14 +1,13 @@
-import { indent, type Render } from "./common.js";
 import type { TypeNode } from "ts-morph";
 import {
+  indent,
   argsOf,
-  fail,
   idOf,
   lastName,
-  safeMembers,
   strOf,
   tupleOf,
-} from "./parse.js";
+} from "../typescript-dsl-suede/index.js";
+import { type Render, fail, safeMembers } from "../common.js";
 
 export namespace Class {
   /** Everything that may appear in a class-diagram body. */

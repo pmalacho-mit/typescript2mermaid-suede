@@ -1,15 +1,14 @@
-import { indent, type AnyNode, type Render } from "./common.js";
 import type { TypeNode } from "ts-morph";
 import {
+  indent,
   argsOf,
   boolOf,
-  escapeLabel,
   idOf,
   lastName,
-  safeMembers,
   strOf,
   tupleOf,
-} from "./parse.js";
+} from "../typescript-dsl-suede/index.js";
+import { type AnyNode, type Render, safeMembers, escape } from "../common.js";
 
 export namespace Flowchart {
   export type Direction = "topdown" | "bottomup" | "leftright" | "rightleft";
@@ -204,15 +203,14 @@ class FlowContext {
   bracketLabel(node: FlowNode): string {
     const _bracket = bracket.bind(null, shape(node.shape));
     if (node.label === false)
-      return node.shape === "rectangle" ? "" : _bracket(escapeLabel(node.id));
+      return node.shape === "rectangle" ? "" : _bracket(escape(node.id));
 
-    if (typeof node.label === "string")
-      return _bracket(escapeLabel(node.label));
+    if (typeof node.label === "string") return _bracket(escape(node.label));
 
     // Auto: expand the fully-resolved type when it has members.
     const members = safeMembers(node.typeNode);
     if (members.length === 0)
-      return node.shape === "rectangle" ? "" : _bracket(escapeLabel(node.id));
+      return node.shape === "rectangle" ? "" : _bracket(escape(node.id));
 
     const lines = members.map(
       ({ isMethod, name, params, returns, typeText }) =>
@@ -220,7 +218,7 @@ class FlowContext {
           ? `${name}(${params})${returns ? ": " + returns : ""}`
           : `${name}: ${typeText}`,
     );
-    return _bracket(escapeLabel([node.id, ...lines].join("<br/>")));
+    return _bracket(escape([node.id, ...lines].join("<br/>")));
   }
 }
 
