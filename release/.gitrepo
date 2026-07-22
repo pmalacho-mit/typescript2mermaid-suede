@@ -6,7 +6,7 @@
 [subrepo]
 	remote = https://github.com/pmalacho-mit/typescript2mermaid-suede
 	branch = release
-	commit = 3363b4035886b4f06188e34371e81600405e04e4
-	parent = 81ccc082a40e2c0b9ec48cf094bbafc59849c4ea
+	commit = 4f3660fa5fbdef90a77978dbd1c98d183d51cf3d
+	parent = 1d8028506983b28cd81138e4f1a6d199ed153ba5
 	method = merge
 	cmdver = 0.4.9
