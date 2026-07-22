@@ -1,4 +1,4 @@
-import type { Class } from "../../release/class.js";
+import type { Class } from "../../release/diagrams/class.js";
 
 /* Types expand into real `class` definitions: fields, methods, and
    visibility markers survive resolution through the identity wrappers.  */

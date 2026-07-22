@@ -1,4 +1,4 @@
-import type { Gantt } from "../../release/gantt.js";
+import type { Gantt } from "../../release/diagrams/gantt.js";
 
 export type WebAppGantt = Gantt.Diagram<
   "Web Application Development",

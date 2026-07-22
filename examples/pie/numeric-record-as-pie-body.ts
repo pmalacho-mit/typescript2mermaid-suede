@@ -1,4 +1,4 @@
-import type { Pie } from "../../release/pie.js";
+import type { Pie } from "../../release/diagrams/pie.js";
 
 type MonthlyAwsCosts = {
   "EC2 Instances": 45;

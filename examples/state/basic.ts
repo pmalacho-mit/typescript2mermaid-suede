@@ -1,4 +1,4 @@
-import type { State } from "../../release/state.js";
+import type { State } from "../../release/diagrams/state.js";
 
 type Idle = {};
 type Processing = {};

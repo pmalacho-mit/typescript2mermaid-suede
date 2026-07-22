@@ -1,4 +1,4 @@
-import type { Journey } from "../../release/journey.js";
+import type { Journey } from "../../release/diagrams/journey.js";
 
 type User = {};
 

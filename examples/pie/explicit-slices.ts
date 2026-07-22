@@ -1,4 +1,4 @@
-import type { Pie } from "../../release/pie.js";
+import type { Pie } from "../../release/diagrams/pie.js";
 
 export type ServerResources = Pie.Diagram<
   "Server Resource Usage",

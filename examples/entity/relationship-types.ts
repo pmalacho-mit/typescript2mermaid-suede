@@ -1,4 +1,4 @@
-import type { Entity } from "../../release/entity.js";
+import type { Entity } from "../../release/diagrams/entity.js";
 
 type Customer = { id: Entity.Key.Primary<Entity.Integer>; name: Entity.Text };
 type Invoice = {

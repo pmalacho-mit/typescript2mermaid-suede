@@ -42,8 +42,8 @@ export type Example = Flowchart.Diagram<
 >;
 ```
 
-```
-$ typescript2mermaid example.ts
+```bash
+$ ./release/cli.sh example.ts
 ```
 
 ````
@@ -77,28 +77,50 @@ The intersection is flattened by the checker; the node carries its complete shap
 
 ## Usage
 
-```
-typescript2mermaid <files...> [-o output.md] [--project tsconfig.json]
+The CLI runs straight from source with `tsx` — there is no build step and no installed binary:
+
+```bash
+./release/cli.sh <files...> [--out output.md] [--project tsconfig.json]
+npx tsx release/cli.ts <files...>                # the same, without the wrapper
+npm run gen -- <files...>                        # the same, via the package script
 ```
 
-Every **exported** type alias whose type is a `<Family>.Diagram<...>` is emitted as a `### X` heading plus a fenced ` ```mermaid ` block. (Non-exported diagram aliases are treated as helpers — e.g. a body shared across several themed variants.) Without `-o`, markdown goes to stdout. There is also a programmatic API via `generateFrom`.
+(`node` alone will not run it: the sources use `.js` import specifiers, which its type stripping does not remap to `.ts`. Compile with `npx tsc` first and run `dist/cli.js` if you want plain `node`.)
+
+Every **exported** type alias whose type is a `<Family>.Diagram<...>` is emitted as a `### X` heading plus a fenced ` ```mermaid ` block. (Non-exported diagram aliases are treated as helpers — e.g. a body shared across several themed variants.) Without `--out`, markdown goes to stdout. There is also a programmatic API via `renderFrom`.
+
+`--embed <file>` instead populates markers already present in a Markdown file, replacing what it wrote last time:
+
+```bash
+./release/cli.sh examples/*/*.ts --embed README.md
+./release/cli.sh examples/*/*.ts --embed README.md --check   # CI: exit 1 if stale
+```
+
+```md
+<!-- diagram: DeploymentPipeline -->
+<!-- /diagram -->
+```
+
+Shorthands exist for every flag (`-o`, `-p`, `-e`, `-c`, `-m`, `-h`); see `./release/cli.sh --help`.
 
 ## Supported diagrams
 
 All eight diagram families from the GitHub-supported Mermaid set. Each family lives in its own namespace whose `Diagram` type is the root, and whose `Statement` union constrains what its body accepts — **the type constraints are the documentation**: an invalid statement, direction, cardinality, or score is a compile error. See `examples/` for a DSL rendition of every example in [this Mermaid fundamentals tutorial](https://gist.github.com/GingerGraham/66a1e586fe2addbc6375b1fba1d2818c); all generated output parses cleanly against the Mermaid parser (`node validate.mjs examples/output.md`).
 
-Each family's `Diagram` takes an optional final `Options<...>` type argument:
+Each family's `Diagram` takes an optional final `Render.Options<...>` type argument:
 
 ```ts
-Flowchart.Diagram<"topdown", [...], Options<[Theme<"dark">]>>
+Flowchart.Diagram<"topdown", [...], Render.Options<[Render.Theme<"dark">]>>
 ```
 
-`Options<[Theme<"dark">]>` emits an `%%{init}%%` directive (`default`, `dark`, `forest`, `neutral`). The `Options<...>` wrapper is a marker the generator locates by key, so it works regardless of how many arguments a family's `Diagram` takes. Reuse one body across themed variants by naming it and passing different options:
+`Render.Theme` emits an `%%{init}%%` directive (`default`, `dark`, `forest`, `neutral`). The `Options<...>` wrapper is a marker the generator locates by key, so it works regardless of how many arguments a family's `Diagram` takes. Reuse one body across themed variants by naming it and passing different options:
 
 ```ts
+import type { Flowchart, Render } from "typescript2mermaid";
+
 type Body = [Flowchart.Connect<A, B>];
 export type Light = Flowchart.Diagram<"topdown", Body>;
-export type Dark = Flowchart.Diagram<"topdown", Body, Options<[Theme<"dark">]>>;
+export type Dark = Flowchart.Diagram<"topdown", Body, Render.Options<[Render.Theme<"dark">]>>;
 ```
 
 ### Flowchart
@@ -230,7 +252,11 @@ Journey task actors may be type references or string literals (for names with sp
 
 ## VSCode integration
 
-The `vscode-extension/` directory contains a companion extension: hovering a `<Family>.Diagram<...>` alias shows the generated Mermaid source inline, with a code lens / hover link that opens the fully rendered diagram in a side panel (Mermaid bundled locally, theme-aware). See `vscode-extension/README.md` for build-and-run steps. The extension is a thin client over the library's `GeneratorSession` API — a long-lived project that accepts unsaved buffer text, which other editor integrations can reuse.
+The `vscode-extension/` directory contains a companion extension: hovering a `<Family>.Diagram<...>` alias shows the generated Mermaid source inline, with a code lens / hover link that opens the fully rendered diagram in a side panel (Mermaid bundled locally, theme-aware, pan/zoom).
+
+An open preview **updates live**. Because a diagram's nodes are usually types declared in other modules, it watches the previewed file *plus its transitive imports* — editing a type two files away re-renders the panel, and adding an import expands what's watched. Updates are pushed into the existing webview, so your pan/zoom survives; half-typed code keeps the last good diagram on screen instead of flashing errors.
+
+See `vscode-extension/README.md` for build-and-run steps. The extension is a thin client over `GeneratorSession` — a long-lived project that accepts unsaved buffer text and reports its dependency graph — which other editor integrations can reuse.
 
 ## How it works
 

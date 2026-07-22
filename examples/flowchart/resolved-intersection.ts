@@ -1,4 +1,4 @@
-import type { Flowchart } from "../../release/flowchart.js";
+import type { Flowchart } from "../../release/diagrams/flowchart.js";
 
 type A = { id: string };
 type B = { name: string };

@@ -1,8 +1,18 @@
+/**
+ * Generic readers for a type-level DSL.
+ *
+ * Nothing in here knows what your DSL means — these are the primitives for
+ * getting at what the user wrote (`lastName`, `argsOf`, `strOf`, ...) and what
+ * the checker makes of it (`resolveMembers`). Domain modules build on top.
+ *
+ * The recurring rule: use the *syntax* view for identity (names, literals,
+ * marker wrappers) and the *semantic* view for structure (resolved members).
+ */
 import { Node, SyntaxKind, TypeNode } from "ts-morph";
 
 /* ----------------------- syntax-level helpers ----------------------- */
 
-/** Name of a type reference, e.g. `Flowchart.Connect` for `Flowchart.Connect<A, B>`. */
+/** Name of a type reference, e.g. `Flow.Connect` for `Flow.Connect<A, B>`. */
 export function refName(t: TypeNode | undefined): string | undefined {
   if (!t) return undefined;
   const ref = t.asKind(SyntaxKind.TypeReference);
@@ -10,14 +20,14 @@ export function refName(t: TypeNode | undefined): string | undefined {
   return ref.getTypeName().getText();
 }
 
-/** Last segment of a (possibly qualified) type reference name: `Flowchart.Connect` → `Connect`. */
+/** Last segment of a (possibly qualified) type reference name: `Flow.Connect` → `Connect`. */
 export function lastName(t: TypeNode | undefined): string | undefined {
   return refName(t)?.split(".").pop();
 }
 
 /**
- * Namespace qualifier of a type reference (`Flowchart.Diagram` → `Flowchart`),
- * following import aliases so `import { Flowchart as F }` still resolves.
+ * Namespace qualifier of a type reference (`Flow.Diagram` → `Flow`), following
+ * import aliases so `import { Flow as F }` still resolves.
  */
 export function qualifierOf(t: TypeNode | undefined): string | undefined {
   const ref = t?.asKind(SyntaxKind.TypeReference);
@@ -43,18 +53,18 @@ export function argsOf(t: TypeNode | undefined): TypeNode[] {
 }
 
 /**
- * Follow a type reference through plain type aliases to the node it names, so
- * a named diagram (`type Flow = Flowchart.Diagram<...>`) or a shared body
- * (`type Body = [...]`) can be referenced instead of inlined.
+ * Follow a type reference through plain type aliases to the node it names, so a
+ * named construct (`type Flow = Diagram<...>`) or a shared body (`type Body =
+ * [...]`) can be referenced instead of inlined.
  *
  * Deliberately conservative — a reference is only followed when it takes no type
  * arguments and names an alias that declares no type parameters. Generic aliases
  * would need real type-argument substitution, which is the checker's job, not
  * something worth reimplementing syntactically.
  *
- * Callers must only use this where a DSL construct is expected. Node identity in
- * a flowchart comes from the *name* of the referenced type, so resolving `A` in
- * `Connect<A, B>` down to its `{}` body would destroy the node's id.
+ * Callers must only use this where a DSL construct is expected. A referenced
+ * type's *name* is usually its identity in the output, so resolving `A` in
+ * `Connect<A, B>` down to its `{}` body would destroy that identity.
  */
 export function resolveAlias(t: TypeNode | undefined): TypeNode | undefined {
   let current = t;
@@ -106,58 +116,99 @@ export function tupleOf(t: TypeNode | undefined): TypeNode[] {
   if (!t) return [];
   const direct = t.asKind(SyntaxKind.TupleType);
   if (direct) return direct.getElements();
-  // A plain alias may name a reusable tuple (e.g. a diagram body shared across
-  // several themed diagrams). Follow it, but only when it resolves to a tuple —
-  // a single node reference must stay intact, since a node's identity comes
-  // from its name, not its expanded body.
+  // A plain alias may name a reusable tuple (e.g. a body shared across several
+  // variants). Follow it, but only when it resolves to a tuple — a single node
+  // reference must stay intact, since its identity comes from its name.
   const resolved = resolveAlias(t)?.asKind(SyntaxKind.TupleType);
   if (resolved) return resolved.getElements();
   return [t];
 }
 
-export function fail(msg: string, at?: TypeNode): never {
-  const where = at
-    ? ` at \`${at.getText()}\` (${at.getSourceFile().getBaseName()}:${at.getStartLineNumber()})`
-    : "";
-  throw new Error(`typescript2mermaid: ${msg}${where}`);
+/* --------------------------- error reporting ------------------------- */
+
+/** A DSL compilation error, carrying the node it was raised at. */
+export class DslError extends Error {
+  constructor(
+    message: string,
+    readonly node?: TypeNode,
+  ) {
+    super(message);
+    this.name = "DslError";
+  }
 }
+
+/** Source position of a node, for diagnostics. */
+export interface DslErrorLocation {
+  file: string;
+  /** 1-based. */
+  line: number;
+  /** Character offset into the file. */
+  start: number;
+  end: number;
+}
+
+export function locationOf(node: TypeNode | undefined): DslErrorLocation | undefined {
+  if (!node) return undefined;
+  return {
+    file: node.getSourceFile().getFilePath(),
+    line: node.getStartLineNumber(),
+    start: node.getStart(),
+    end: node.getEnd(),
+  };
+}
+
+/**
+ * Raises a DSL error. Explicitly typed as returning `never` so control-flow
+ * narrowing works at call sites (`args[0] ?? fail(...)`) — TypeScript only
+ * applies that to a const with an explicit annotation.
+ */
+export type Fail = (msg: string, at?: TypeNode) => never;
+
+/**
+ * Builds a `fail` for one DSL, so every thrown message is prefixed consistently
+ * and every error carries the offending node (which is what later becomes an
+ * editor squiggle — retrofitting it is painful, so thread it from the start).
+ */
+export const failWith =
+  (prefix: string): Fail =>
+  (msg: string, at?: TypeNode): never => {
+    const where = at
+      ? ` at \`${at.getText()}\` (${at.getSourceFile().getBaseName()}:${at.getStartLineNumber()})`
+      : "";
+    throw new DslError(`${prefix}: ${msg}${where}`, at);
+  };
+
+/** Default `fail`; prefer `failWith("<your-dsl>")`. */
+export const fail: Fail = failWith("dsl");
 
 /* ------------------------------ node ids ---------------------------- */
 
-/** Mermaid-safe identifier for a referenced type. */
-export function idOf(type: TypeNode): string {
-  const name = lastName(type) ?? type.getText();
-  return sanitizeId(name);
-}
+/** The name a referenced type contributes to the output. */
+export const nameOf = (type: TypeNode): string =>
+  lastName(type) ?? type.getText();
 
-export function sanitizeId(name: string): string {
-  return name.replace(/[^A-Za-z0-9_]/g, "_");
-}
+/** Replaces everything outside `[A-Za-z0-9_]` with `_`. */
+export const sanitizeId = (name: string): string =>
+  name.replace(/[^A-Za-z0-9_]/g, "_");
+
+/** Identifier-safe id for a referenced type. */
+export const idOf = (
+  type: TypeNode,
+  sanitize: (name: string) => string = sanitizeId,
+): string => sanitize(nameOf(type));
 
 /* --------------------- checker-level type expansion ------------------ */
-
-const VISIBILITY_MARKERS: Record<string, string> = {
-  Private: "-",
-  Protected: "#",
-  Internal: "~",
-};
-
-/** Entity.Key.* marker name → mermaid key code. */
-const KEY_MARKERS: Record<string, string> = {
-  Primary: "PK",
-  Foreign: "FK",
-  Unique: "UK",
-};
 
 export interface ResolvedMember {
   name: string;
   /** Declared type text with markers unwrapped (falls back to checker text). */
   typeText: string;
-  /** Mermaid visibility symbol (+, -, #, ~). Defaults to "+". */
-  visibility: string;
-  /** Mermaid key codes for Entity.Key markers on the declaration (PK/FK/UK). */
-  keys: string[];
-  /** True if this member is callable (renders as a method in class diagrams). */
+  /**
+   * Marker names peeled off the declaration, outermost first — e.g.
+   * `["Private"]` for `foo: Private<string>`. See `resolveMembers`.
+   */
+  markers: string[];
+  /** True if this member is callable. */
   isMethod: boolean;
   /** Rendered parameter list for methods, e.g. `name: string`. */
   params: string;
@@ -165,13 +216,24 @@ export interface ResolvedMember {
   returns: string;
 }
 
+export interface ResolveMembersOptions {
+  /**
+   * Identifies a DSL marker type — an identity alias (`type Private<T> = T`)
+   * used to annotate a member without changing what its type actually is. The
+   * checker sees straight through them; they are recovered here from the
+   * property's original declaration syntax.
+   */
+  isMarker?(name: string): boolean;
+}
+
 /**
  * Fully resolves the type behind a type node (through aliases, intersections,
- * mapped types, etc.) into a flat member list. Marker wrappers (Private,
- * PK, ...) are identity types, so the checker sees clean types; we recover
- * the markers syntactically from each property's original declaration.
+ * mapped types, etc.) into a flat member list.
  */
-export function resolveMembers(t: TypeNode): ResolvedMember[] {
+export function resolveMembers(
+  t: TypeNode,
+  { isMarker }: ResolveMembersOptions = {},
+): ResolvedMember[] {
   const type = t.getType();
   const members: ResolvedMember[] = [];
 
@@ -194,21 +256,17 @@ export function resolveMembers(t: TypeNode): ResolvedMember[] {
       returns = ret === "void" ? "" : ret;
     }
 
-    // Unwrap identity markers (Private<...>, PK<...>, ...), recording them.
-    let visibility = "+";
-    const keys: string[] = [];
-    while (declTypeNode) {
-      const name = lastName(declTypeNode);
-      if (name && VISIBILITY_MARKERS[name]) {
-        visibility = VISIBILITY_MARKERS[name];
+    // Unwrap identity markers, recording them outermost-first.
+    const markers: string[] = [];
+    if (isMarker)
+      while (declTypeNode) {
+        const name = lastName(declTypeNode);
+        if (name === undefined || !isMarker(name)) break;
+        markers.push(name);
         declTypeNode = argsOf(declTypeNode)[0];
-      } else if (name && KEY_MARKERS[name]) {
-        keys.push(KEY_MARKERS[name]);
-        declTypeNode = argsOf(declTypeNode)[0];
-      } else break;
-    }
+      }
 
-    // Function-typed properties render as methods.
+    // Function-typed properties are methods too.
     if (declTypeNode?.isKind(SyntaxKind.FunctionType)) {
       const fn = declTypeNode.asKindOrThrow(SyntaxKind.FunctionType);
       isMethod = true;
@@ -227,29 +285,25 @@ export function resolveMembers(t: TypeNode): ResolvedMember[] {
           ? sym.getTypeAtLocation(decl).getText()
           : sym.getDeclaredType().getText()));
 
-    members.push({
-      name: sym.getName(),
-      typeText,
-      visibility,
-      keys,
-      isMethod,
-      params,
-      returns,
-    });
+    members.push({ name: sym.getName(), typeText, markers, isMethod, params, returns });
   }
 
   return members;
 }
 
-export function safeMembers(t: TypeNode) {
+/** `resolveMembers` that yields `[]` instead of throwing on unresolvable types. */
+export function safeMembers(
+  t: TypeNode,
+  options?: ResolveMembersOptions,
+): ResolvedMember[] {
   try {
-    return resolveMembers(t);
+    return resolveMembers(t, options);
   } catch {
     return [];
   }
 }
 
-/** Numeric-literal properties of an object type (for Pie-from-type bodies). */
+/** Numeric-literal properties of an object type (`{ CPU: 35; Memory: 25 }`). */
 export function numericLiteralProps(
   t: TypeNode,
 ): { name: string; value: number }[] {
@@ -257,19 +311,8 @@ export function numericLiteralProps(
   for (const sym of t.getType().getProperties()) {
     const decl = sym.getDeclarations()[0];
     const propType = decl ? sym.getTypeAtLocation(decl) : sym.getDeclaredType();
-    if (propType.isNumberLiteral()) {
-      out.push({
-        name: sym.getName(),
-        value: propType.getLiteralValue() as number,
-      });
-    }
+    if (propType.isNumberLiteral())
+      out.push({ name: sym.getName(), value: propType.getLiteralValue() as number });
   }
   return out;
-}
-
-/* ----------------------------- label escaping ------------------------ */
-
-/** Escape text for use inside a quoted Mermaid node label. */
-export function escapeLabel(s: string): string {
-  return s.replace(/"/g, "#quot;");
 }

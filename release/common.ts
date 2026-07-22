@@ -1,9 +1,66 @@
+import type { TypeNode } from "ts-morph";
+import {
+  failWith,
+  safeMembers as safeMembersOf,
+  type AnyType,
+  type Options,
+  ResolvedMember as BaseMember,
+} from "./typescript-dsl-suede/index.js";
+
+/** Escape text for use inside a quoted Mermaid node label. */
+export const escape = (text: string) => text.replace(/"/g, "#quot;");
+
+const VISIBILITY_MARKERS: Record<string, string> = {
+  Private: "-",
+  Protected: "#",
+  Internal: "~",
+};
+
+/** Entity.Key.* marker name → mermaid key code. */
+const KEY_MARKERS: Record<string, string> = {
+  Primary: "PK",
+  Foreign: "FK",
+  Unique: "UK",
+};
+
+const isMarker = (name: string): boolean =>
+  name in VISIBILITY_MARKERS || name in KEY_MARKERS;
+
+export interface ResolvedMember extends BaseMember {
+  /** Mermaid visibility symbol (+, -, #, ~). Defaults to "+". */
+  visibility: string;
+  /** Mermaid key codes for Entity.Key markers on the declaration (PK/FK/UK). */
+  keys: string[];
+}
+
+/**
+ * Fully resolved members of a type, with Mermaid's marker wrappers (Private,
+ * Key.Primary, ...) decoded. Markers are identity types, so the checker sees
+ * clean types; they are recovered syntactically from each property's original
+ * declaration.
+ */
+
+export function safeMembers(t: TypeNode): ResolvedMember[] {
+  return safeMembersOf(t, { isMarker }).map((member) => {
+    let visibility = "+";
+    const keys: string[] = [];
+    for (const marker of member.markers) {
+      if (marker in VISIBILITY_MARKERS)
+        visibility = VISIBILITY_MARKERS[marker]!;
+      else if (marker in KEY_MARKERS) keys.push(KEY_MARKERS[marker]!);
+    }
+    return { ...member, visibility, keys };
+  });
+}
+
+export const fail = failWith("typescript2mermaid");
+
 /**
  * A node in a diagram: any of your own object types. Referenced types are
  * fully resolved by the type checker at generation time. (The `length`
  * exclusion only exists to keep statement tuples from matching here.)
  */
-export type AnyNode = object & { readonly length?: never };
+export type AnyNode = AnyType;
 
 export namespace Render {
   /** Sets a Mermaid `%%{init}%%` theme directive on the rendered diagram. */
@@ -21,12 +78,8 @@ export namespace Render {
    *
    *   Flowchart.Diagram<"topdown", [...], Options<[Theme<"dark">]>>
    */
-  export type Options<O extends Option[] = []> = {
-    readonly __options: O;
-  };
+  export type Options<O extends Option[] = []> = Options_<O>;
 }
 
-export const indent =
-  (level: number, amount = 4) =>
-  (strings: TemplateStringsArray, ...values: unknown[]) =>
-    " ".repeat(amount).repeat(level) + String.raw({ raw: strings }, ...values);
+/** Aliased so the namespace member above can shadow the imported name. */
+type Options_<O extends readonly unknown[]> = Options<O>;

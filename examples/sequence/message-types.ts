@@ -1,4 +1,4 @@
-import type { Sequence } from "../../release/sequence.js";
+import type { Sequence } from "../../release/diagrams/sequence.js";
 
 type User = {};
 type API = {};

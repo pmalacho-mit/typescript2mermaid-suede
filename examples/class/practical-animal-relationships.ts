@@ -1,4 +1,4 @@
-import type { Class } from "../../release/class.js";
+import type { Class } from "../../release/diagrams/class.js";
 
 type Animal = {
   name: string;

@@ -1,6 +1,12 @@
-import { indent, type Render } from "./common.js";
 import type { TypeNode } from "ts-morph";
-import { argsOf, fail, lastName, strOf, tupleOf } from "./parse.js";
+import {
+  indent,
+  argsOf,
+  lastName,
+  strOf,
+  tupleOf,
+} from "../typescript-dsl-suede/index.js";
+import { fail, type Render } from "../common.js";
 
 export namespace Gantt {
   export type Status = "done" | "active" | "crit";
