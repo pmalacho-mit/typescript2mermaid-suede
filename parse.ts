@@ -44,7 +44,8 @@ export function argsOf(t: TypeNode | undefined): TypeNode[] {
 
 /**
  * Follow a type reference through plain type aliases to the node it names, so
- * `type Flow = Flowchart.Diagram<...>` can be used as `Render<Flow>`.
+ * a named diagram (`type Flow = Flowchart.Diagram<...>`) or a shared body
+ * (`type Body = [...]`) can be referenced instead of inlined.
  *
  * Deliberately conservative — a reference is only followed when it takes no type
  * arguments and names an alias that declares no type parameters. Generic aliases
@@ -103,8 +104,14 @@ export function boolOf(t: TypeNode | undefined): boolean | undefined {
 /** Elements of a tuple type node; single non-tuple nodes become a 1-tuple. */
 export function tupleOf(t: TypeNode | undefined): TypeNode[] {
   if (!t) return [];
-  const tup = t.asKind(SyntaxKind.TupleType);
-  if (tup) return tup.getElements();
+  const direct = t.asKind(SyntaxKind.TupleType);
+  if (direct) return direct.getElements();
+  // A plain alias may name a reusable tuple (e.g. a diagram body shared across
+  // several themed diagrams). Follow it, but only when it resolves to a tuple —
+  // a single node reference must stay intact, since a node's identity comes
+  // from its name, not its expanded body.
+  const resolved = resolveAlias(t)?.asKind(SyntaxKind.TupleType);
+  if (resolved) return resolved.getElements();
   return [t];
 }
 
@@ -118,8 +125,8 @@ export function fail(msg: string, at?: TypeNode): never {
 /* ------------------------------ node ids ---------------------------- */
 
 /** Mermaid-safe identifier for a referenced type. */
-export function idOf(t: TypeNode): string {
-  const name = lastName(t) ?? t.getText();
+export function idOf(type: TypeNode): string {
+  const name = lastName(type) ?? type.getText();
   return sanitizeId(name);
 }
 
@@ -232,6 +239,14 @@ export function resolveMembers(t: TypeNode): ResolvedMember[] {
   }
 
   return members;
+}
+
+export function safeMembers(t: TypeNode) {
+  try {
+    return resolveMembers(t);
+  } catch {
+    return [];
+  }
 }
 
 /** Numeric-literal properties of an object type (for Pie-from-type bodies). */
