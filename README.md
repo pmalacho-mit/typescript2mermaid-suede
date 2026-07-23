@@ -94,12 +94,15 @@ Every **exported** type alias whose type is a `<Family>.Diagram<...>` is emitted
 ```bash
 ./release/cli.sh examples/*/*.ts --embed README.md
 ./release/cli.sh examples/*/*.ts --embed README.md --check   # CI: exit 1 if stale
+./release/cli.sh --embed docs/api.md                         # sources default to docs/diagram.ts
 ```
 
 ```md
 <!-- diagram: DeploymentPipeline -->
 <!-- /diagram -->
 ```
+
+When embedding, the source files may be omitted: each `--embed` target's folder is searched for a `diagram.ts`, so a document can sit next to the diagrams it shows. A marker resolves to the *nearest* matching source, so every folder is free to export a diagram under the same name.
 
 Shorthands exist for every flag (`-o`, `-p`, `-e`, `-c`, `-m`, `-h`); see `./release/cli.sh --help`.
 
