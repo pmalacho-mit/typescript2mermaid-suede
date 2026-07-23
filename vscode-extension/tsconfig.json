@@ -10,8 +10,12 @@
     "esModuleInterop": true,
     "types": ["node", "vscode"],
     "baseUrl": ".",
+    // Must mirror the esbuild aliases in build.mjs, or `tsc` and the bundle
+    // disagree about what these imports mean.
     "paths": {
-      "typescript2mermaid-lib": ["../index.ts"],
+      "@typescript-dsl-suede/vscode": ["../typescript-dsl-suede/vscode-extension/extension.ts"],
+      "@typescript-dsl-suede/webview": ["../typescript-dsl-suede/vscode-extension/webview.ts"],
+      "@typescript-dsl-suede": ["../typescript-dsl-suede/index.ts"],
       "ts-morph": ["./node_modules/ts-morph"]
     }
   },

@@ -1,14 +1,14 @@
-import { indent, type AnyNode, type Render } from "./common.js";
 import type { TypeNode } from "ts-morph";
 import {
+  indent,
   argsOf,
-  fail,
   idOf,
   lastName,
   numOf,
   strOf,
   tupleOf,
-} from "./parse.js";
+} from "../typescript-dsl-suede/index.js";
+import { fail, type AnyNode, type Render } from "../common.js";
 
 export namespace Journey {
   /** Task scores are the 1–5 satisfaction scale Mermaid journeys use. */

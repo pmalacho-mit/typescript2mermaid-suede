@@ -2,6 +2,8 @@
 
 Hover any exported `<Family>.Diagram<...>` type alias (or anywhere on its declaration line) to see the generated Mermaid source, and click **Preview rendered diagram** — or the code lens above the alias — to open the fully drawn diagram in a side panel.
 
+An open preview **updates as you type**. A diagram's nodes are usually types declared in other modules, so the panel watches the previewed file *plus its transitive imports*: editing a type two files away re-renders it, and adding an import expands what's watched. Updates are pushed into the running webview rather than reloading it, so your pan/zoom survives — and while code is half-typed the last good diagram stays on screen instead of flashing an error.
+
 ## Install (consumers of the vendored library)
 
 The library ships as raw TypeScript source vendored next to this folder (via git-subrepo), so there is nothing to build outside this directory. One command builds and installs the extension:
