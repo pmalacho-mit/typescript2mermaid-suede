@@ -1,0 +1,22 @@
+{
+  // `tsx` strips types without checking them, so the suite would happily run
+  // with a typo'd property name. This config exists purely so `npm run
+  // test:types` can catch that. It is separate from the root config because the
+  // root emits (rootDir: release) and tests must not be part of that output.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [".", "../release"],
+  // Extension code is a separate build with its own tsconfig (@types/vscode and
+  // path aliases), exactly as the root config excludes it.
+  "exclude": [
+    "../release/vscode-extension",
+    "../release/typescript-dsl-suede/vscode-extension"
+  ]
+}

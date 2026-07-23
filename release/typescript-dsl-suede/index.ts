@@ -14,7 +14,6 @@
 export {
   editRange,
   passesGates,
-  rangeContains,
   rangeOf,
   type Analyzer,
   type Finding,
@@ -23,7 +22,7 @@ export {
 } from "./analyze.js";
 
 /* Running it. */
-export { defineDsl, type Runner } from "./runner.js";
+export { defineDsl, type DefineDslOptions, type Runner } from "./runner.js";
 export { DslSession } from "./session.js";
 
 /* Getting output into docs. */
@@ -38,14 +37,24 @@ export {
 
 /* Finding your constructs. */
 export {
+  constructClassifier,
   enclosingTypeAlias,
   importedNames,
+  isDeclaredWithin,
+  matchesConstruct,
   matchesNamespace,
   namespacePath,
+  parseConstruct,
   qualifiedName,
+  resolveConstruct,
   typeAliases,
   typeReferences,
   unwrapMarkers,
+  type ClassifyOptions,
+  type ConstructDeclaration,
+  type ConstructPattern,
+  type DeclaredWithin,
+  type MatchConstructOptions,
   type NameQuery,
   type NamespaceQuery,
   type TypeAliasQuery,

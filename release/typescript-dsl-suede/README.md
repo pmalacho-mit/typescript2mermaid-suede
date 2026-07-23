@@ -161,10 +161,55 @@ A menu, not a mandate. An `Analyzer` is free to walk the AST however it likes.
 |---|---|
 | `typeAliases(source, query)` | aliases **including inside namespaces**, filtered by export / namespace / name |
 | `typeReferences(source, name, { importedFrom, outermostOnly })` | every use of a construct anywhere, guarded by its import |
+| `constructClassifier(kinds, { qualifier, declaredWithin })` | node → which of `kinds` it is, or `undefined` (see below) |
+| `matchesConstruct(node, parseConstruct("Ns.Name"), { declaredWithin })` | the single-pattern test the classifier is built from |
+| `resolveConstruct(node)` / `isDeclaredWithin(node, root)` | the checker's answer: where is this type actually declared? |
 | `namespacePath(node)` / `qualifiedName(decl)` | `["Test","Unit"]` / `"Test.Unit.Simple"` — a good stable `Finding.id` |
 | `enclosingTypeAlias(node)` | the declaration a nested construct belongs to |
 | `unwrapMarkers(type, isMarker)` | peel identity annotations (`Secret<string>` *is* `string`) |
 | `rangeOf(node)` | the anchor for every editor surface |
+
+### Telling your constructs apart from user types
+
+When a DSL accepts the user's *own* types in the same position as its constructs
+— a flowchart node written beside a `Connect<…>` statement — matching by bare
+name collides: a user type happening to be called `Connect` is not your
+statement. There are two strengths of guard.
+
+**Qualifier** (syntactic). Require the namespace: only `Flowchart.Connect<…>`
+matches, a bare `Connect` falls through. It resolves through import aliases
+(`import { Flowchart as F }`, `F.Connect<…>` still matches) and works even when
+the import doesn't resolve — but a user who declares their *own* `namespace
+Flowchart` would slip through.
+
+**Identity** (`declaredWithin`, the strongest). Require the reference to resolve
+to a declaration inside your source. A user type — even one under a shadow
+`namespace Flowchart` — is declared elsewhere and is rejected with certainty. The
+name and qualifier still *route* among your constructs (they tell
+`Flowchart.Diagram` from `Sequence.Diagram`, both named `Diagram`); identity is
+the *gate* that a match is genuinely yours.
+
+```ts
+import { fileURLToPath } from "node:url";
+import { dirname } from "node:path";
+
+const LIBRARY_ROOT = dirname(fileURLToPath(import.meta.url)); // your vendored root
+
+const statementKind = constructClassifier(
+  ["Connect", "Node", "Subgraph"] as const,
+  { qualifier: "Flowchart", declaredWithin: LIBRARY_ROOT },
+);
+statementKind(node); // "Connect" | "Node" | "Subgraph" | undefined
+```
+
+The trade-off identity makes: it **requires the reference to resolve**, so an
+unresolved import matches nothing. For a library vendored as source and imported
+by relative path that is the right call — imports are written once and resolve;
+a same-named user type never does. `dispatch`'s `createAnalyzer` takes the same
+`declaredWithin` to gate top-level construct detection, and `defineDsl`'s
+`{ resolveImports: true }` makes `code()` resolve a snippet's imports so identity
+works there too. Omit both `qualifier` and `declaredWithin` to match on name
+alone, for a DSL whose constructs are not namespaced.
 
 ## Reading them
 

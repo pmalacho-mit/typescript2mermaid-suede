@@ -41,10 +41,6 @@ export function rangeOf(node: Node): SourceRange {
   };
 }
 
-/** True when `range` contains the given character offset. */
-export const rangeContains = (range: SourceRange, offset: number): boolean =>
-  offset >= range.start && offset <= range.end;
-
 /**
  * One thing your DSL found in a file.
  *

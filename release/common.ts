@@ -1,3 +1,5 @@
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { TypeNode } from "ts-morph";
 import {
   failWith,
@@ -6,6 +8,17 @@ import {
   type Options,
   ResolvedMember as BaseMember,
 } from "./typescript-dsl-suede/index.js";
+
+/**
+ * The vendored library's own root — this `release/` directory.
+ *
+ * A reference is one of *our* constructs only if the checker resolves it to a
+ * declaration inside here. Since consumers vendor this folder into their project
+ * and import it by relative path, that resolves; a user type sharing a
+ * construct's name never does. Passed to the analyzer and the family classifiers
+ * as their `declaredWithin` route. See the DSL library's `constructClassifier`.
+ */
+export const LIBRARY_ROOT = dirname(fileURLToPath(import.meta.url));
 
 /** Escape text for use inside a quoted Mermaid node label. */
 export const escape = (text: string) => text.replace(/"/g, "#quot;");

@@ -2,13 +2,13 @@ import type { TypeNode } from "ts-morph";
 import {
   indent,
   argsOf,
-  lastName,
+  constructClassifier,
   numOf,
   numericLiteralProps,
   strOf,
   tupleOf,
 } from "../typescript-dsl-suede/index.js";
-import { fail, type Render } from "../common.js";
+import { fail, type Render, LIBRARY_ROOT } from "../common.js";
 
 export namespace Pie {
   /**
@@ -34,14 +34,22 @@ type Statements = {
   Slice: Pie.Slice<any, any>;
 };
 
+/**
+ * A user type named `Slice` is legal as the object-form body, so only a
+ * `Pie.Slice<…>` the checker resolves into this library counts as a tuple entry.
+ * The `keyof Statements` annotation keeps the label checked against the DSL.
+ */
+const isSlice = constructClassifier(["Slice"] satisfies (keyof Statements)[], {
+  qualifier: "Pie",
+  declaredWithin: LIBRARY_ROOT,
+});
+
 export const render = (body: TypeNode): string => {
   const [title, data] = argsOf(body);
   const lines: string[] = [`pie title ${strOf(title) ?? ""}`];
 
   const entries = tupleOf(data);
-  const isSlices =
-    entries.length > 0 &&
-    entries.every((e) => lastName(e) === ("Slice" satisfies keyof Statements));
+  const isSlices = entries.length > 0 && entries.every((e) => isSlice(e));
   if (isSlices) {
     for (const slice of entries) {
       const [label, value] = argsOf(slice);

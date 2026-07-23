@@ -259,7 +259,7 @@ The `vscode-extension/` directory contains a companion extension: hovering a `<F
 
 An open preview **updates live**. Because a diagram's nodes are usually types declared in other modules, it watches the previewed file *plus its transitive imports* — editing a type two files away re-renders the panel, and adding an import expands what's watched. Updates are pushed into the existing webview, so your pan/zoom survives; half-typed code keeps the last good diagram on screen instead of flashing errors.
 
-See `vscode-extension/README.md` for build-and-run steps. The extension is a thin client over `GeneratorSession` — a long-lived project that accepts unsaved buffer text and reports its dependency graph — which other editor integrations can reuse.
+See `vscode-extension/README.md` for build-and-run steps. The extension is a thin client over `dsl.createSession()` — a long-lived project that accepts unsaved buffer text and reports its dependency graph — which other editor integrations can reuse.
 
 ## How it works
 
