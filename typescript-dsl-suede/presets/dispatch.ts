@@ -30,14 +30,17 @@ import type { SourceFile, TypeAliasDeclaration, TypeNode } from "ts-morph";
 import { rangeOf, type Analyzer, type Finding, type SourceRange } from "../analyze.js";
 import {
   enclosingTypeAlias,
+  matchesConstruct,
   matchesNamespace,
   namespacePath,
+  parseConstruct,
   qualifiedName,
   typeAliases,
   typeReferences,
+  type DeclaredWithin,
   type NamespaceQuery,
 } from "../discover.js";
-import { failWith, lastName, qualifierOf, refName, resolveAlias, type Fail } from "../parse.js";
+import { failWith, resolveAlias, type Fail } from "../parse.js";
 
 /* ------------------------------- handlers ---------------------------- */
 
@@ -113,6 +116,14 @@ export interface DispatchConfig<T> {
    * module, so a local type sharing a construct's name is ignored.
    */
   importedFrom?: string | ((moduleSpecifier: string) => boolean);
+  /**
+   * Require a matched construct to resolve to a declaration in your source —
+   * identity matching, the strongest guard against a user type that shares a
+   * construct's name. Handler keys still route (they discriminate
+   * `Flowchart.Diagram` from `Sequence.Diagram`); this gates that the match is
+   * genuinely yours. Requires resolution, so an unresolved import is not matched.
+   */
+  declaredWithin?: DeclaredWithin;
   /** `"references"`: skip usages nested inside another match. Default `true`. */
   outermostOnly?: boolean;
   /**
@@ -136,31 +147,6 @@ export interface DispatchAnalyzer<T> extends Analyzer<T> {
   handle(node: TypeNode, source: SourceFile): T | undefined;
 }
 
-/* ------------------------------- matching ---------------------------- */
-
-interface Pattern {
-  key: string;
-  name: string;
-  qualifier: string | undefined;
-}
-
-function parsePattern(key: string): Pattern {
-  const dot = key.lastIndexOf(".");
-  return dot === -1
-    ? { key, name: key, qualifier: undefined }
-    : { key, name: key.slice(dot + 1), qualifier: key.slice(0, dot) };
-}
-
-function matches(pattern: Pattern, node: TypeNode): boolean {
-  if (lastName(node) !== pattern.name) return false;
-  if (pattern.qualifier === undefined) return true;
-  // `qualifierOf` follows import aliases; the raw text is the fallback for a
-  // reference the checker can't resolve (constant while editing).
-  return (
-    qualifierOf(node) === pattern.qualifier || refName(node) === pattern.key
-  );
-}
-
 /* ------------------------------- analyzer ---------------------------- */
 
 export function createAnalyzer<T>(config: DispatchConfig<T>): DispatchAnalyzer<T> {
@@ -174,10 +160,11 @@ export function createAnalyzer<T>(config: DispatchConfig<T>): DispatchAnalyzer<T
     outermostOnly = true,
     transform,
     identify,
+    declaredWithin,
   } = config;
 
   const fail: Fail = failWith(name);
-  const patterns = Object.keys(handlers).map(parsePattern);
+  const patterns = Object.keys(handlers).map(parseConstruct);
 
   const gates =
     config.gates ?? [...new Set(patterns.map((p) => `${p.name}<`))];
@@ -187,7 +174,8 @@ export function createAnalyzer<T>(config: DispatchConfig<T>): DispatchAnalyzer<T
     // Follow a plain alias so a named construct (`type Named = Flow.Diagram<…>`)
     // referenced elsewhere still resolves. Conservative by design.
     const target = resolveAlias(node) ?? node;
-    return patterns.find((p) => matches(p, target))?.key;
+    return patterns.find((p) => matchesConstruct(target, p, { declaredWithin }))
+      ?.key;
   };
 
   const context = (

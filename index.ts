@@ -1,5 +1,4 @@
-export { renderFrom, analyzer, dsl } from "./render.js";
-export { GeneratorSession } from "./session.js";
+export { renderFrom, dsl } from "./render.js";
 export type { AnyNode, Render } from "./common.js";
 export type { Flowchart } from "./diagrams/flowchart.js";
 export type { Sequence } from "./diagrams/sequence.js";

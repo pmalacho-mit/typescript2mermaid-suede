@@ -22,7 +22,7 @@ flowchart TD
     Api["Api<br/>url: string"] --> Db["Db<br/>host: string"]
 ```
 
-**Resolution is the point.** A referenced type expands into the output: flowchart labels list members, class diagrams become full `class` bodies, ER entities become attribute lists — all surviving intersections (`A & B`) and aliases.
+**Resolution is the point.** A referenced type expands into the output: flowchart labels list members, class diagrams become full `class` bodies, ER entities become attribute lists — all surviving intersections (`A & B`) and aliases. Your types may be named anything, including a diagram statement like `Node` or `Connect`: a reference counts as ours only when the type checker resolves it into this library's source, so `Flowchart.Node<…>` imported from here is a statement while your own `Node` is always just a node — even if you declare your own `namespace Flowchart`. (The corollary: the import must resolve. Since you vendor this folder and import it by path, it does; a broken import means no diagrams until it is fixed, which your editor flags anyway.)
 
 **Options** are each Diagram's optional final type argument. Themes: `default | dark | forest | neutral`.
 
@@ -133,11 +133,10 @@ command is idempotent and safe in a pre-commit hook or CI.
 ```ts
 import { renderFrom } from "typescript2mermaid";
 
-renderFrom.files(["diagrams.ts"]);   // → { name, file, code }[]
-renderFrom.code("export type D = ...");
-renderFrom.source(sourceFile);       // existing ts-morph SourceFile
+renderFrom.files(["diagrams.ts"]);        // → { name, file, code }[]
+renderFrom.code("export type D = ...");   // a string in — the testing front door
 ```
 
-For editors, `GeneratorSession` keeps a project alive across calls: `updateFile(path, text)` pushes unsaved buffers, `generate(path)` re-emits, and `dependencies(path)` returns the file plus its transitive imports (what to watch for live previews).
+For editors, `dsl.createSession()` keeps a project alive across calls: `updateFile(path, text)` pushes unsaved buffers, `analyze(path)` re-emits findings (each `data` is the Mermaid source), and `dependencies(path)` returns the file plus its transitive imports (what to watch for live previews).
 
-Under the hood this package is a thin Mermaid layer over a generic TypeScript-DSL harness (`typescript-dsl-suede/`): `render.ts` maps each construct — `"Flowchart.Diagram"`, `"Sequence.Diagram"`, … — to the family module that renders it, and exports `analyzer` / `dsl` for embedding elsewhere.
+Under the hood this package is a thin Mermaid layer over a generic TypeScript-DSL harness (`typescript-dsl-suede/`): `render.ts` maps each construct — `"Flowchart.Diagram"`, `"Sequence.Diagram"`, … — to the family module that renders it, and exports the built `dsl` for embedding elsewhere.

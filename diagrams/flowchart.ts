@@ -3,12 +3,18 @@ import {
   indent,
   argsOf,
   boolOf,
+  constructClassifier,
   idOf,
-  lastName,
   strOf,
   tupleOf,
 } from "../typescript-dsl-suede/index.js";
-import { type AnyNode, type Render, safeMembers, escape } from "../common.js";
+import {
+  type AnyNode,
+  type Render,
+  safeMembers,
+  escape,
+  LIBRARY_ROOT,
+} from "../common.js";
 
 export namespace Flowchart {
   export type Direction = "topdown" | "bottomup" | "leftright" | "rightleft";
@@ -163,11 +169,22 @@ const statements = [
   "ApplyClass",
 ] satisfies (keyof Statements)[];
 
+/**
+ * The statement kind of a body member, or `undefined` when it is a plain node.
+ *
+ * A user type may be called `Node` or `Subgraph`; only a `Flowchart.Node<…>`
+ * that the checker resolves into this library is a statement, so a bare `Node`
+ * — or anyone else's `Flowchart` namespace — is a node whose type gets rendered.
+ * The qualifier routes among our statements; `declaredWithin` proves they are
+ * ours.
+ */
+const statementKind = constructClassifier(statements, {
+  qualifier: "Flowchart",
+  declaredWithin: LIBRARY_ROOT,
+});
+
 const is = {
-  statement: (member: TypeNode) => {
-    const query = lastName(member);
-    return query !== undefined && (statements as string[]).includes(query);
-  },
+  statement: (member: TypeNode) => statementKind(member) !== undefined,
 };
 
 interface FlowNode {
@@ -223,7 +240,7 @@ class FlowContext {
 }
 
 function collectNodeDeclarations(statement: TypeNode, ctx: FlowContext): void {
-  const kind = lastName(statement);
+  const kind = statementKind(statement);
   if (kind === ("Node" satisfies keyof Statements)) {
     const [type, shape, label] = argsOf(statement);
     const node = ctx.register(type);
@@ -244,7 +261,10 @@ function appendFlowStatement(
   lines: string[],
   level: number,
 ): void | number {
-  const kind = lastName(type);
+  // A member that isn't a qualified statement falls through to `default`, where
+  // it renders as a standalone node — which is how a user type named `Connect`
+  // reaches the output as a node instead of being mistaken for an edge.
+  const kind = statementKind(type);
   switch (kind) {
     case "Connect" satisfies keyof Statements: {
       const [from, to, label, style] = argsOf(type);
