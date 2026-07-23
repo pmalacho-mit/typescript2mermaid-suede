@@ -18,9 +18,13 @@
  *
  * The closing marker is written on the first run; every run after that replaces
  * what sits between the pair, so the command is idempotent.
+ *
+ * Sources may be omitted entirely when embedding: each `--embed` target's own
+ * folder is searched for a `diagram.ts`, so a document and the diagrams it shows
+ * can live side by side and `./cli.sh --embed docs/api.md` is the whole command.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { relative } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { cli } from "./typescript-cli-suede/index.js";
 import { embed, type EmbedTarget } from "./typescript-dsl-suede/markdown.js";
 import { renderFrom } from "./render.js";
@@ -28,7 +32,11 @@ import { renderFrom } from "./render.js";
 export const defaults = {
   marker: "diagram",
   language: "mermaid",
+  /** Looked for beside each `--embed` target when no sources are given. */
+  source: "diagram.ts",
 } as const;
+
+const identifier = "typescript2mermaid";
 
 type Diagram = ReturnType<typeof renderFrom.files>[number];
 
@@ -49,12 +57,45 @@ const report = (diagrams: Diagram[]) =>
 const shorten = (path: string) => relative(process.cwd(), path) || path;
 
 /**
+ * With no explicit sources, each `--embed` target's own folder supplies the
+ * diagrams: `docs/api.md` looks for `docs/diagram.ts`. Deduplicated, so several
+ * documents in one folder share a single source file.
+ */
+const colocatedSources = (markdowns: readonly string[]): string[] => [
+  ...new Set(markdowns.map((path) => join(dirname(path), defaults.source))),
+];
+
+/**
+ * How far a source file sits from a document, as `[up, down]` directory steps.
+ *
+ * Ordered lexicographically, so "in my folder" beats "in my subfolder" beats
+ * "in my parent" beats "in a sibling". Counting `..` first means a diagram is
+ * never pulled from outside the document's own subtree while something inside
+ * it matches.
+ */
+const distance = (documentDir: string, file: string): [number, number] => {
+  const rel = relative(documentDir, dirname(file));
+  if (rel === "") return [0, 0];
+  const parts = rel.split(/[\\/]/);
+  const up = parts.filter((part) => part === "..").length;
+  return [up, parts.length - up];
+};
+
+const closer = (a: [number, number], b: [number, number]) =>
+  a[0] - b[0] || a[1] - b[1];
+
+/**
  * Marker name → diagram. Matches the alias name (`Deploy`) or its
- * namespace-qualified id (`Docs.Deploy`); `from=` narrows by source path when
- * two files declare the same name.
+ * namespace-qualified id (`Docs.Deploy`); `from=` narrows by source path.
+ *
+ * When several sources declare the same name, the one nearest the document
+ * wins — which is what makes a per-folder `diagram.ts` workable, since every
+ * folder is free to export a diagram called `Diagram`. Proximity only breaks
+ * ties: if two equally-near sources both match, that is still reported rather
+ * than silently guessed.
  */
 const resolver =
-  (diagrams: Diagram[], problems: string[]) =>
+  (diagrams: Diagram[], document: string, problems: string[]) =>
   (target: EmbedTarget): string | undefined => {
     const { from } = target.attrs;
     const matches = diagrams.filter(
@@ -64,19 +105,33 @@ const resolver =
     );
 
     if (matches.length === 1) return matches[0]!.code;
+    if (matches.length === 0) {
+      problems.push(
+        `no diagram named "${target.name}"${from ? ` from "${from}"` : ""}`,
+      );
+      return undefined;
+    }
+
+    const dir = dirname(document);
+    const ranked = matches
+      .map((diagram) => ({ diagram, at: distance(dir, diagram.file) }))
+      .sort((a, b) => closer(a.at, b.at));
+    const nearest = ranked.filter(({ at }) => closer(at, ranked[0]!.at) === 0);
+
+    if (nearest.length === 1) return nearest[0]!.diagram.code;
+
     problems.push(
-      matches.length === 0
-        ? `no diagram named "${target.name}"${from ? ` from "${from}"` : ""}`
-        : `"${target.name}" is ambiguous — declared in ${matches
-            .map((m) => shorten(m.file))
-            .join(", ")}; add from="…" to the marker`,
+      `"${target.name}" is ambiguous — declared in ${nearest
+        .map(({ diagram }) => shorten(diagram.file))
+        .join(", ")}; add from="…" to the marker`,
     );
     return undefined;
   };
 
 cli.onEntry(import.meta.url, () => {
   const args = cli(
-    "Render TypeScript type-level diagram declarations to Mermaid.",
+    "Render TypeScript type-level diagram declarations to Mermaid.\n" +
+      `With no source files, will (try to) read a ${defaults.source} beside each --embed target.`,
     cli.flag(
       ["project", "p"],
       "tsconfig.json to resolve the source files against.",
@@ -99,10 +154,26 @@ cli.onEntry(import.meta.url, () => {
   );
 
   const { project, embed: markdowns, out, check, marker } = args;
-  const sources = [...args];
+  let sources = [...args];
+
+  if (sources.length === 0 && markdowns.length > 0) {
+    // Guessed rather than given, so a candidate that isn't there is skipped
+    // rather than fatal — the markers it would have served report themselves.
+    const candidates = colocatedSources(markdowns);
+    sources = candidates.filter(existsSync);
+    if (sources.length === 0) {
+      console.error(
+        `${identifier}: no source files given, and no ${defaults.source} beside ${candidates
+          .map((path) => shorten(dirname(path)) || ".")
+          .join(", ")}.`,
+      );
+      process.exit(1);
+    }
+    console.error(`${identifier}: using ${sources.map(shorten).join(", ")}`);
+  }
 
   if (sources.length === 0) {
-    console.error("typescript2mermaid: no source files given.\n");
+    console.error(`${identifier}: no source files given.\n`);
     console.error(args.help());
     process.exit(1);
   }
@@ -112,13 +183,13 @@ cli.onEntry(import.meta.url, () => {
   const missing = sources.filter((path) => !existsSync(path));
   if (missing.length > 0) {
     for (const path of missing)
-      console.error(`typescript2mermaid: no such file: ${path}`);
+      console.error(`${identifier}: no such file: ${path}`);
     process.exit(1);
   }
 
   const diagrams = renderFrom.files(sources, project);
   if (diagrams.length === 0) {
-    console.error("typescript2mermaid: no `Diagram<...>` type aliases found.");
+    console.error(`${identifier}: no \`Diagram<...>\` type aliases found.`);
     process.exit(1);
   }
 
@@ -134,7 +205,7 @@ cli.onEntry(import.meta.url, () => {
     const found: string[] = [];
     const result = embed(
       readFileSync(path, "utf8"),
-      resolver(diagrams, found),
+      resolver(diagrams, path, found),
       { marker, language: defaults.language },
     );
 
@@ -142,19 +213,19 @@ cli.onEntry(import.meta.url, () => {
 
     if (result.embedded.length === 0 && result.unresolved.length === 0)
       console.error(
-        `typescript2mermaid: ${shorten(path)} has no <!-- ${marker}: … --> markers.`,
+        `${identifier}: ${shorten(path)} has no <!-- ${marker}: … --> markers.`,
       );
     // Unresolved markers are reported below; calling the file "up to date"
     // while errors follow reads as a contradiction.
     else if (!result.changed && result.unresolved.length === 0)
       console.error(
-        `typescript2mermaid: ${shorten(path)} up to date (${result.embedded.length} diagram(s)).`,
+        `${identifier}: ${shorten(path)} up to date (${result.embedded.length} diagram(s)).`,
       );
     else if (result.changed && check) stale.push(path);
     else if (result.changed) {
       writeFileSync(path, result.text);
       console.error(
-        `typescript2mermaid: embedded ${result.embedded.length} diagram(s) into ${shorten(path)}`,
+        `${identifier}: embedded ${result.embedded.length} diagram(s) into ${shorten(path)}`,
       );
     }
   }
@@ -163,12 +234,12 @@ cli.onEntry(import.meta.url, () => {
     const text = report(diagrams);
     const current = existsSync(out) ? readFileSync(out, "utf8") : undefined;
     if (current === text)
-      console.error(`typescript2mermaid: ${shorten(out)} up to date.`);
+      console.error(`${identifier}: ${shorten(out)} up to date.`);
     else if (check) stale.push(out);
     else {
       writeFileSync(out, text);
       console.error(
-        `typescript2mermaid: wrote ${diagrams.length} diagram(s) to ${shorten(out)}`,
+        `${identifier}: wrote ${diagrams.length} diagram(s) to ${shorten(out)}`,
       );
     }
   }
@@ -176,10 +247,9 @@ cli.onEntry(import.meta.url, () => {
   // No destination at all — the original behaviour, useful for piping.
   if (markdowns.length === 0 && !out) console.log(report(diagrams).trimEnd());
 
-  for (const problem of problems)
-    console.error(`typescript2mermaid: ${problem}`);
+  for (const problem of problems) console.error(`${identifier}: ${problem}`);
   for (const path of stale)
-    console.error(`typescript2mermaid: ${shorten(path)} is out of date.`);
+    console.error(`${identifier}: ${shorten(path)} is out of date.`);
 
   if (problems.length > 0 || stale.length > 0) process.exit(1);
 });

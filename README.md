@@ -58,9 +58,24 @@ call it by whatever path this folder sits at.
 ./cli.sh <files...> --out out.md                     # standalone report
 ./cli.sh <files...> --embed README.md                # embed in place (repeatable)
 ./cli.sh <files...> --embed README.md --check        # CI: exit 1 if out of date
+./cli.sh --embed docs/api.md                         # sources default to docs/diagram.ts
 ```
 
 Equivalently, without the wrapper: `npx tsx cli.ts <files...>`.
+
+**Sources are optional when embedding.** With no files given, each `--embed`
+target's own folder is searched for a `diagram.ts` — so a document and the
+diagrams it shows can sit side by side and `./cli.sh --embed docs/api.md` is the
+whole command. Several documents in one folder share that one source file. A
+folder without a `diagram.ts` is skipped rather than fatal; its markers report
+themselves as unresolved.
+
+Because a marker resolves to the *nearest* matching source (see below), every
+folder can export a diagram under the same name:
+
+```bash
+./cli.sh --embed a/README.md --embed b/README.md   # each gets its own a|b/diagram.ts
+```
 
 | flag | shorthand | |
 | --- | --- | --- |
@@ -101,8 +116,14 @@ run, and is what makes every later run replace rather than append — so the
 command is idempotent and safe in a pre-commit hook or CI.
 
 - **Names** match the alias (`DeploymentPipeline`) or its namespace-qualified id
-  (`Docs.DeploymentPipeline`). If two files export the same name, disambiguate
-  with `<!-- diagram: Shared from="src/b.ts" -->`.
+  (`Docs.DeploymentPipeline`).
+- **The nearest source wins** when several export the same name, measured in
+  directory steps from the document: same folder, then a subfolder, then a
+  parent, then further afield. So every folder is free to export a plain
+  `Diagram`, and `./cli.sh --embed a/README.md --embed b/README.md` gives each
+  document its own. Proximity only breaks ties — two *equally* near sources are
+  still reported rather than silently guessed. Force a choice with
+  `<!-- diagram: Shared from="src/b.ts" -->`, which is applied before proximity.
 - **Nothing else is touched.** Prose outside the markers, markers *documented
   inside* a fenced code block, and hand-written text under a marker that has no
   closing tag are all left alone.
