@@ -23,6 +23,7 @@ import {
   existsSync,
   mkdirSync,
 } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -97,6 +98,40 @@ export function copyAsset(root, { from, to }) {
   return dest;
 }
 
+/**
+ * Rewrite `import.meta.url` in our own sources to the file's real path.
+ *
+ * The extension bundle is CJS, where `import.meta` does not exist — esbuild
+ * substitutes `{}`, so `fileURLToPath(import.meta.url)` throws *at module load*
+ * and the extension dies before `activate()` runs. A vendored library is
+ * expected to define its root that way (see the DSL README's `LIBRARY_ROOT`), so
+ * without this every such extension silently ships broken.
+ *
+ * The literal we inject is the *source* file's URL, not the bundle's. That is
+ * both the honest answer for inlined source and the necessary one: `LIBRARY_ROOT`
+ * feeds `declaredWithin`, which compares it against declaration paths in the
+ * user's project — the vendored source tree, not `dist/`.
+ *
+ * Scoped to first-party sources; dependencies keep esbuild's default handling.
+ */
+const importMetaUrlPlugin = {
+  name: "source-import-meta-url",
+  setup(build) {
+    build.onLoad({ filter: /\.(m?ts|m?js)$/ }, async (args) => {
+      if (args.path.includes("node_modules")) return undefined;
+      const source = await readFile(args.path, "utf8");
+      if (!source.includes("import.meta.url")) return undefined;
+      return {
+        contents: source.replaceAll(
+          "import.meta.url",
+          JSON.stringify(pathToFileURL(args.path).href),
+        ),
+        loader: path.extname(args.path).slice(1),
+      };
+    });
+  },
+};
+
 export async function buildExtension({
   root,
   entry = "src/extension.ts",
@@ -110,6 +145,7 @@ export async function buildExtension({
   minify = false,
   sourcemap = false,
   logLevel = "info",
+  plugins = [],
   esbuildOptions = {},
 }) {
   if (!root) throw new Error("buildExtension: `root` is required");
@@ -137,6 +173,7 @@ export async function buildExtension({
     nodePaths: [path.join(root, "node_modules")],
     outfile: path.join(root, outfile),
     logLevel,
+    plugins: [importMetaUrlPlugin, ...plugins],
     ...esbuildOptions,
   });
 

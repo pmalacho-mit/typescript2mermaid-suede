@@ -8,7 +8,7 @@
     "outDir": "dist",
     "rootDir": "release",
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node"],
   },
   "include": ["release"],
   // VS Code extension code is a separate build with its own tsconfig, 
