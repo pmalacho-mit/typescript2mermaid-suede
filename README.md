@@ -7,8 +7,11 @@ To see the installable source code, please checkout the [release branch](https:/
 ## Installation
 
 ```bash
-bash <(curl https://suede.sh/install/release) --repo pmalacho-mit/typescript2mermaid-suede
+bash <(curl https://suede.sh/install/release) --repo pmalacho-mit/typescript2mermaid-suede --dev
 ```
+
+> [!NOTE]
+> Remove `--dev` if you want to install the package as a release dependency (unlikely)
 
 <details>
 <summary>
